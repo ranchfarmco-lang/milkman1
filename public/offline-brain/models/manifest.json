@@ -1,0 +1,291 @@
+{
+  "description": "Downloadable, locally-runnable open-weight models covering the brain of an offline coding system: reasoning, coding, agentic coding, planning, tool use, long context, vision, embeddings and reranking. Every entry is legally downloadable and runnable on your own machine under the stated license.",
+  "languages": ["en"],
+  "quantization_sources": [
+    "bartowski (GGUF, broad coverage)",
+    "unsloth (GGUF, strong quants)",
+    "lmstudio-community (GGUF)",
+    "Qwen official GGUF repos"
+  ],
+  "models": [
+    {
+      "id": "qwen3-coder-30b-a3b",
+      "repo": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+      "family": "Qwen3-Coder",
+      "params": "30B (3B active)",
+      "license": "Apache-2.0",
+      "gated": false,
+      "capabilities": ["coding", "agentic-coding", "code-generation", "tool-use", "long-context"],
+      "default_sets": ["agentic", "coding"],
+      "note": "MoE agentic coding model; the strongest open-weight agentic coder of its size."
+    },
+    {
+      "id": "qwen2.5-coder-32b",
+      "repo": "Qwen/Qwen2.5-Coder-32B-Instruct",
+      "family": "Qwen2.5-Coder",
+      "params": "32B",
+      "license": "Apache-2.0",
+      "gated": false,
+      "capabilities": ["coding", "code-generation", "code-analysis", "debugging", "code-review"],
+      "default_sets": ["coding", "review"],
+      "note": "Dense coding workhorse for generation, analysis, debugging and review."
+    },
+    {
+      "id": "qwen2.5-coder-14b",
+      "repo": "Qwen/Qwen2.5-Coder-14B-Instruct",
+      "params": "14B",
+      "license": "Apache-2.0",
+      "capabilities": ["coding", "code-generation", "code-analysis"],
+      "default_sets": ["small"],
+      "note": "Mid-size coder for laptops with 16 GB VRAM or 32 GB RAM."
+    },
+    {
+      "id": "qwen2.5-coder-7b",
+      "repo": "Qwen/Qwen2.5-Coder-7B-Instruct",
+      "params": "7B",
+      "license": "Apache-2.0",
+      "capabilities": ["coding", "code-generation", "code-analysis"],
+      "default_sets": ["small", "tiny"],
+      "note": "Smallest useful coder; runs on a modest GPU or CPU."
+    },
+    {
+      "id": "deepseek-r1",
+      "repo": "deepseek-ai/DeepSeek-R1",
+      "params": "671B MoE",
+      "license": "MIT",
+      "capabilities": ["deep-reasoning", "planning", "code-analysis", "debugging"],
+      "note": "Full frontier reasoning model. Practical use is via the distills below unless you have a large multi-GPU box."
+    },
+    {
+      "id": "deepseek-r1-distill-qwen-32b",
+      "repo": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+      "params": "32B",
+      "license": "MIT",
+      "capabilities": ["deep-reasoning", "planning", "debugging"],
+      "default_sets": ["reasoning"],
+      "note": "Best locally-runnable distilled reasoning model for a single workstation GPU."
+    },
+    {
+      "id": "deepseek-r1-distill-qwen-14b",
+      "repo": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+      "params": "14B",
+      "license": "MIT",
+      "capabilities": ["deep-reasoning", "planning"],
+      "default_sets": ["small", "reasoning"]
+    },
+    {
+      "id": "deepseek-r1-distill-qwen-7b",
+      "repo": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+      "params": "7B",
+      "license": "MIT",
+      "capabilities": ["deep-reasoning", "planning"],
+      "default_sets": ["tiny"]
+    },
+    {
+      "id": "qwq-32b",
+      "repo": "Qwen/QwQ-32B",
+      "params": "32B",
+      "license": "Apache-2.0",
+      "capabilities": ["deep-reasoning", "planning", "tool-use"],
+      "default_sets": ["reasoning"]
+    },
+    {
+      "id": "qwq-32b-preview",
+      "repo": "Qwen/QwQ-32B-Preview",
+      "params": "32B",
+      "license": "Apache-2.0",
+      "capabilities": ["deep-reasoning", "planning"],
+      "note": "Earlier preview of QwQ; keep for comparison."
+    },
+    {
+      "id": "phi-4",
+      "repo": "microsoft/phi-4",
+      "params": "14B",
+      "license": "MIT",
+      "capabilities": ["reasoning", "code-generation"],
+      "default_sets": ["small"]
+    },
+    {
+      "id": "qwen3-32b",
+      "repo": "Qwen/Qwen3-32B",
+      "params": "32B",
+      "license": "Apache-2.0",
+      "capabilities": ["reasoning", "tool-use", "planning", "long-context"],
+      "default_sets": ["reasoning", "agentic"]
+    },
+    {
+      "id": "qwen3-8b",
+      "repo": "Qwen/Qwen3-8B",
+      "params": "8B",
+      "license": "Apache-2.0",
+      "capabilities": ["reasoning", "tool-use", "long-context"],
+      "default_sets": ["tiny", "agentic"]
+    },
+    {
+      "id": "llama-3.3-70b-instruct",
+      "repo": "meta-llama/Llama-3.3-70B-Instruct",
+      "params": "70B",
+      "license": "Llama-3.3 Community License",
+      "gated": true,
+      "capabilities": ["general-reasoning", "planning", "tool-use"],
+      "default_sets": ["large"],
+      "note": "Requires accepting the license on Hugging Face and an HF token."
+    },
+    {
+      "id": "llama-3.1-8b-instruct",
+      "repo": "meta-llama/Llama-3.1-8B-Instruct",
+      "params": "8B",
+      "license": "Llama-3.1 Community License",
+      "gated": true,
+      "capabilities": ["tool-use", "general-reasoning"],
+      "default_sets": ["tiny"]
+    },
+    {
+      "id": "hermes-3-llama-3.1-8b",
+      "repo": "NousResearch/Hermes-3-Llama-3.1-8B",
+      "params": "8B",
+      "license": "Llama-3.1 Community License",
+      "capabilities": ["tool-use", "planning"],
+      "note": "Strong function-calling / structured tool-use behaviour."
+    },
+    {
+      "id": "qwen2.5-72b-instruct",
+      "repo": "Qwen/Qwen2.5-72B-Instruct",
+      "params": "72B",
+      "license": "Qwen License",
+      "capabilities": ["general-reasoning", "planning", "code-generation"],
+      "default_sets": ["large"]
+    },
+    {
+      "id": "qwen2.5-7b-instruct-1m",
+      "repo": "Qwen/Qwen2.5-7B-Instruct-1M",
+      "params": "7B",
+      "license": "Apache-2.0",
+      "capabilities": ["long-context"],
+      "note": "1M-token context for whole-repo reasoning on modest hardware."
+    },
+    {
+      "id": "qwen2.5-vl-7b-instruct",
+      "repo": "Qwen/Qwen2.5-VL-7B-Instruct",
+      "params": "7B",
+      "license": "Apache-2.0",
+      "capabilities": ["vision", "code-generation"],
+      "default_sets": ["vision"],
+      "note": "Reads screenshots, diagrams and UI captures; useful for browser inspection."
+    },
+    {
+      "id": "llama-3.2-11b-vision-instruct",
+      "repo": "meta-llama/Llama-3.2-11B-Vision-Instruct",
+      "params": "11B",
+      "license": "Llama-3.2 Community License",
+      "gated": true,
+      "capabilities": ["vision"],
+      "default_sets": ["vision"]
+    },
+    {
+      "id": "gemma-3-27b-it",
+      "repo": "google/gemma-3-27b-it",
+      "params": "27B",
+      "license": "Gemma Terms of Use",
+      "gated": true,
+      "capabilities": ["general-reasoning", "vision", "code-generation"],
+      "default_sets": ["vision", "large"]
+    },
+    {
+      "id": "starcoder2-15b",
+      "repo": "bigcode/starcoder2-15b-instruct-v0.1",
+      "params": "15B",
+      "license": "BigCode OpenRAIL-M",
+      "capabilities": ["code-generation", "code-analysis"],
+      "note": "Code-completion specialist; good for fill-in-the-middle."
+    },
+    {
+      "id": "codellama-13b-instruct",
+      "repo": "codellama/CodeLlama-13b-Instruct-hf",
+      "params": "13B",
+      "license": "Llama-2 Community License",
+      "capabilities": ["code-generation", "code-analysis"]
+    },
+    {
+      "id": "bge-m3",
+      "repo": "BAAI/bge-m3",
+      "kind": "embedding",
+      "params": "568M",
+      "license": "MIT",
+      "capabilities": ["embeddings"],
+      "default_sets": ["embeddings"],
+      "note": "Multilingual dense+sparse+colbert embeddings; the standard codebase-index embedder."
+    },
+    {
+      "id": "bge-large-en-v1.5",
+      "repo": "BAAI/bge-large-en-v1.5",
+      "kind": "embedding",
+      "params": "335M",
+      "license": "MIT",
+      "capabilities": ["embeddings"],
+      "default_sets": ["embeddings"]
+    },
+    {
+      "id": "e5-large-v2",
+      "repo": "intfloat/e5-large-v2",
+      "kind": "embedding",
+      "params": "335M",
+      "license": "MIT",
+      "capabilities": ["embeddings"]
+    },
+    {
+      "id": "nomic-embed-text-v1.5",
+      "repo": "nomic-ai/nomic-embed-text-v1.5",
+      "kind": "embedding",
+      "params": "137M",
+      "license": "Apache-2.0",
+      "capabilities": ["embeddings"],
+      "default_sets": ["embeddings"],
+      "note": "Long-context (8192) text embeddings, runs fast on CPU."
+    },
+    {
+      "id": "minilm-l6",
+      "repo": "sentence-transformers/all-MiniLM-L6-v2",
+      "kind": "embedding",
+      "params": "22M",
+      "license": "Apache-2.0",
+      "capabilities": ["embeddings"],
+      "default_sets": ["tiny"]
+    },
+    {
+      "id": "jina-embeddings-v3",
+      "repo": "jinaai/jina-embeddings-v3",
+      "kind": "embedding",
+      "params": "570M",
+      "license": "CC-BY-NC-4.0",
+      "capabilities": ["embeddings"],
+      "note": "Non-commercial license; task-specific LoRA adapters."
+    },
+    {
+      "id": "bge-reranker-v2-m3",
+      "repo": "BAAI/bge-reranker-v2-m3",
+      "kind": "reranker",
+      "params": "568M",
+      "license": "Apache-2.0",
+      "capabilities": ["reranking"],
+      "default_sets": ["rerank"],
+      "note": "Cross-encoder reranker for retrieval over code and docs."
+    },
+    {
+      "id": "bge-reranker-large",
+      "repo": "BAAI/bge-reranker-large",
+      "kind": "reranker",
+      "params": "560M",
+      "license": "MIT",
+      "capabilities": ["reranking"]
+    },
+    {
+      "id": "mxbai-rerank-large-v1",
+      "repo": "mixedbread-ai/mxbai-rerank-large-v1",
+      "kind": "reranker",
+      "params": "435M",
+      "license": "Apache-2.0",
+      "capabilities": ["reranking"]
+    }
+  ]
+}

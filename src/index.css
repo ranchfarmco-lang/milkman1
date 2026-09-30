@@ -1,0 +1,214 @@
+/* DO NOT CHANGE */
+@import "tailwindcss";
+@import "tw-animate-css";
+@custom-variant dark (&:is(.dark *));
+
+/* DO NOT CHANGE */
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/* CHANGE VALUES FOR THEME */
+/* Soft charcoal background (#262626), slate-gray surfaces (#2f2f2f), white
+ * text. Two greys, one a step above the other, and no hue anywhere. */
+:root {
+  --radius: 1rem;
+  --background: #262626; /* soft charcoal */
+  --foreground: oklch(1 0 0);
+  --card: #2f2f2f; /* slate gray */
+  --card-foreground: oklch(1 0 0);
+  --popover: #2f2f2f; /* slate gray */
+  --popover-foreground: oklch(1 0 0);
+  --primary: oklch(1 0 0);
+  --primary-foreground: oklch(0 0 0);
+  --secondary: #3a3a3a;
+  --secondary-foreground: oklch(1 0 0);
+  --muted: #3a3a3a;
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: #454545;
+  --accent-foreground: oklch(1 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 14%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(1 0 0 / 40%);
+  --chart-1: oklch(1 0 0);
+  --chart-2: oklch(0.78 0 0);
+  --chart-3: oklch(0.6 0 0);
+  --chart-4: oklch(0.45 0 0);
+  --chart-5: oklch(0.32 0 0);
+  --sidebar: #2f2f2f; /* slate gray */
+  --sidebar-foreground: oklch(1 0 0);
+  --sidebar-primary: oklch(1 0 0);
+  --sidebar-primary-foreground: oklch(0 0 0);
+  --sidebar-accent: #3a3a3a;
+  --sidebar-accent-foreground: oklch(1 0 0);
+  --sidebar-border: oklch(1 0 0 / 14%);
+  --sidebar-ring: oklch(1 0 0 / 40%);
+}
+
+/* Already charcoal and white, so .dark changes nothing. */
+.dark {
+  --background: #262626; /* soft charcoal */
+  --foreground: oklch(1 0 0);
+  --card: #2f2f2f; /* slate gray */
+  --card-foreground: oklch(1 0 0);
+  --popover: #2f2f2f; /* slate gray */
+  --popover-foreground: oklch(1 0 0);
+  --primary: oklch(1 0 0);
+  --primary-foreground: oklch(0 0 0);
+  --secondary: #3a3a3a;
+  --secondary-foreground: oklch(1 0 0);
+  --muted: #3a3a3a;
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: #454545;
+  --accent-foreground: oklch(1 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 14%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(1 0 0 / 40%);
+  --sidebar: #2f2f2f; /* slate gray */
+  --sidebar-foreground: oklch(1 0 0);
+  --sidebar-primary: oklch(1 0 0);
+  --sidebar-primary-foreground: oklch(0 0 0);
+  --sidebar-accent: #3a3a3a;
+  --sidebar-accent-foreground: oklch(1 0 0);
+  --sidebar-border: oklch(1 0 0 / 14%);
+  --sidebar-ring: oklch(1 0 0 / 40%);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  /*
+   * Charcoal, on every level that can be seen.
+   *
+   * The tokens below are already charcoal, but a token only colours the
+   * elements that ask for it. These three rules make it unconditional: the
+   * document itself is charcoal, the body fills the window and is charcoal, and
+   * the root node is charcoal and at least a full window tall even when a page
+   * has little on it — a short 404 or a sign-in card no longer leaves the rest of
+   * the screen to the browser's default white. `color-scheme: dark` extends the
+   * same to what CSS does not paint — the canvas, scrollbars, overscroll, and
+   * form controls.
+   */
+  html {
+    background-color: var(--background);
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground;
+    min-height: 100dvh;
+    -webkit-font-smoothing: antialiased;
+  }
+  #root {
+    min-height: 100dvh;
+    background-color: var(--background);
+  }
+  button:not([disabled]),
+  [role="button"]:not([disabled]) {
+    cursor: pointer;
+  }
+}
+
+/*
+ * The calendar's side panel — the only <aside> in the app.
+ *
+ * On a phone it used to be a sideways scroller with the Feeds card parked off
+ * the right-hand edge, so there was no way to scroll to it. As a column with
+ * its own vertical scroll it is always reachable, and on a wide screen it
+ * settles back into the fixed-width column beside the grid.
+ *
+ * This is unlayered on purpose: it wins over the utility classes on the
+ * element, which could not be edited directly.
+ */
+aside {
+  flex-direction: column;
+  max-height: 52vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+@media (min-width: 1024px) {
+  aside {
+    max-height: none;
+    width: 13.25rem; /* 212px, matching the panel's own width */
+    flex-shrink: 0;
+  }
+}
+
+/*
+ * The calendar page as a whole: give the grid its own space and let the page
+ * scroll so its bottom is always reachable.
+ *
+ * The page is one full-height flex column and everything inside it was sized
+ * to the viewport. On a phone the side panel took the top and the month grid
+ * was squeezed away to nothing — you could not even see the calendar. On a
+ * short window the last weeks of the month were cut off with no way to scroll
+ * to them. Now the page itself scrolls, the grid comes first with a real height
+ * of its own, and the side cards follow it underneath.
+ *
+ * `:has()` picks out the calendar's own containers — an <aside> exists only on
+ * this page — since the elements carry no class the rule could hang on. Kept
+ * unlayered for the same reason as the rule above, so it wins over the
+ * utilities.
+ */
+div:has(> div > aside) {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+@media (max-width: 1023px) {
+  /* The grid first, with a height of its own; the side cards scroll below it. */
+  div:has(> aside) {
+    flex: 0 0 auto;
+  }
+
+  div:has(> aside) > main {
+    order: -1;
+    flex: 0 0 auto;
+    height: 72vh;
+    min-height: 26rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  /* A floor on the grid so a short window scrolls instead of hiding the tail. */
+  div:has(> aside) > main {
+    min-height: 34rem;
+  }
+}

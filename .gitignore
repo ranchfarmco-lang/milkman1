@@ -1,0 +1,41 @@
+node_modules
+dist
+src/convex/_generated
+
+# Python bytecode: the local brain (public/offline-brain/brain) is Python, so a
+# run of it or of its test suite leaves these behind.
+__pycache__/
+*.pyc
+
+# Keys and tokens never belong in the repo. The example file stays, so the
+# setup is still documented without any real values.
+.env
+.env.*
+!.env.example
+
+# Local-only state: which Convex deployment this machine is pointed at, and the
+# platform's own run logs.
+.convex
+.vly-run
+
+# A vendored copy of someone else's source tree (~81 MB, including ripgrep
+# binaries and a 18 MB tarball) that the offline brain documents. It is a
+# reference, not this app's code, and it is far too large — and too unrelated —
+# to keep in this repository. `public/offline-brain/` is the part that ships:
+# it carries the archive below, which is packed from this tree by
+# `bun scripts/pack-freebuff-source.mjs`.
+offline-ai-coding-brain
+
+# Generated downloads of the source tree — what saving this project produces
+# rather than what it is made of. The `.zip` line matters as much as the other:
+# an archive left in the project root is otherwise packed into the next archive,
+# and the one after that, which is how a 21 MB save becomes a 42 MB save.
+*.tar.gz
+*.zip
+
+# ...except the one archive the app actually serves. It sits inside the offline
+# brain package, every download on the Offline Brain page carries it, and the
+# installer unpacks it — so a downloaded copy is complete and fetches nothing.
+!public/offline-brain/source/freebuff-source.zip
+.vercel
+.env*

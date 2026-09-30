@@ -1,0 +1,93 @@
+{
+  "name": "offline-ai-coding-brain",
+  "purpose": "A complete, legally downloadable, locally-runnable software stack that reproduces the capabilities of an AI coding system: reason, plan, write/understand/search/modify/debug/review/test code, run commands, use a terminal and filesystem, research and browse the web, coordinate agents, and remember project context.",
+  "installers": {
+    "supporting": "scripts/install-supporting.sh",
+    "model_runtimes": "scripts/install-runtimes.sh",
+    "coding_tools": "scripts/install-coding-tools.sh",
+    "terminal_tools": "scripts/install-terminal-tools.sh",
+    "file_tools": "scripts/install-file-tools.sh",
+    "browser_tools": "scripts/install-browser-tools.sh",
+    "research_tools": "scripts/install-research-tools.sh",
+    "reasoning": "scripts/install-reasoning.sh",
+    "orchestration": "scripts/install-orchestration.sh",
+    "context_memory": "scripts/install-context-memory.sh",
+    "libraries": "scripts/install-libraries.sh",
+    "agents": "scripts/install-agents.sh",
+    "models": "scripts/download-models.sh",
+    "source": "scripts/capture-freebuff-source.sh"
+  },
+  "capabilities": {
+    "reason": [
+      "models: deepseek-r1-distill-qwen-32b, qwq-32b, qwen3-32b, phi-4",
+      "reasoning: DSPy, Outlines, guidance, Guardrails AI, self-consistency pattern"
+    ],
+    "think-through-coding-problems": [
+      "reasoning: LangGraph reflect loop, DSPy, verification venv",
+      "models: qwen2.5-coder-32b, deepseek-r1-distill-qwen-32b"
+    ],
+    "write-code": [
+      "models: qwen3-coder-30b-a3b, qwen2.5-coder-32b/14b/7b",
+      "agents: aider, gpt-engineer, gptme, plandex, codex-cli, gemini-cli, opencode"
+    ],
+    "understand-existing-code": [
+      "context: tree-sitter, ctags, code-map (source/freebuff/packages/code-map)",
+      "libraries: tree-sitter-language-pack"
+    ],
+    "find-relevant-files": [
+      "file-tools: fd, ripgrep, fzf, tree",
+      "source: source/freebuff/sdk/src/tools/glob.ts, list-directory.ts"
+    ],
+    "search-a-codebase": [
+      "coding-tools: ripgrep, ast-grep, universal-ctags, GNU global",
+      "context: zoekt, livegrep"
+    ],
+    "plan-implementations": [
+      "reasoning: LangGraph, DSPy, AutoGen, CrewAI",
+      "source: source/freebuff/agents/thinker, agents/base2/base2-plan.ts"
+    ],
+    "modify-code": [
+      "source: source/freebuff/sdk/src/tools/change-file.ts, apply-patch.ts",
+      "coding-tools: patch, diff, sd"
+    ],
+    "debug-code": [
+      "coding-tools: gdb/lldb, strace, pyright",
+      "models: deepseek-r1-distill, qwen2.5-coder"
+    ],
+    "review-code": [
+      "source: source/freebuff/agents/reviewer",
+      "reasoning: semgrep, reviewdog, bandit, ruff, pyright"
+    ],
+    "test-code": [
+      "coding-tools: hyperfine, pytest, jest/vitest via node",
+      "terminal-tools: tmux, expect"
+    ],
+    "run-commands": [
+      "source: source/freebuff/sdk/src/tools/run-terminal-command.ts",
+      "terminal-tools: bash, tmux, timeout"
+    ],
+    "use-a-terminal": ["terminal-tools: tmux, zellij, expect, script"],
+    "use-a-filesystem": [
+      "file-tools: coreutils, findutils, rsync",
+      "source: source/freebuff/sdk/src/tools/read-files.ts, change-file.ts"
+    ],
+    "research-technical-information": [
+      "research-tools: SearXNG, ddgr, trafilatura, tldr, DevDocs",
+      "source: source/freebuff/agents/researcher"
+    ],
+    "use-a-browser": ["browser-tools: Playwright, Puppeteer, Selenium, browser-use, Stagehand"],
+    "inspect-websites": ["browser-tools: CDP (chrome-remote-interface), lynx, w3m, htmlq, xmllint"],
+    "run-multiple-agents": ["orchestration: Ray, Celery, Dask", "reasoning: AutoGen, CrewAI, MetaGPT"],
+    "coordinate-agents": [
+      "orchestration: MCP, LiteLLM, Prefect, Dagster",
+      "source: source/freebuff/agents (file-explorer, editor, thinker, researcher, reviewer, librarian, basher)"
+    ],
+    "remember-project-context": ["context/memory: mem0, Letta, cognee, LangGraph sqlite checkpoints"],
+    "maintain-task-context": ["context: LangGraph checkpointer, sqlite-utils"],
+    "select-tools": ["source: source/freebuff/packages/agent-runtime/src/run-agent-step.ts", "orchestration: MCP, LiteLLM"],
+    "select-models": ["source: source/freebuff/sdk/src/impl/model-provider.ts", "orchestration: LiteLLM"],
+    "execute-coding-tasks": ["agents: aider, OpenHands, SWE-agent, Goose, plandex"],
+    "build-applications": ["agents: gpt-engineer, OpenHands, codex-cli; supporting: node/bun/python/rust toolchains"]
+  },
+  "licenses_note": "Every component here is open source or open weight. Model licenses are listed in models/manifest.json; several (Llama, Gemma) are gated and require accepting the license on Hugging Face and authenticating with `hf auth login`."
+}

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+  <!-- iOS ignores the manifest icons and installs from this one alone. -->
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+  />
+  <meta
+    name="description"
+    content="Family Chat Hub — a private hub for one family: an AI assistant, an AI builder, a shared messenger with voice and video calls, a contacts roster, and a control room for your devices."
+  />
+  <meta name="theme-color" content="#000000" />
+  <!-- Once installed: its own black window, no browser bars, its own name. -->
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <meta name="apple-mobile-web-app-title" content="Family Hub" />
+  <!--
+    Black before anything else runs.
+
+    The theme below paints black, but the stylesheet arrives with the bundle,
+    and until it does the browser shows its own default — white. That first
+    paint, a CSS failure, or an unstyled state would all be white without this.
+    Setting it here, in the document itself, means the very first pixel is black
+    and stays black whatever happens to the bundle. `color-scheme: dark` is the
+    same guarantee for the parts a page does not paint: the canvas behind it,
+    the scrollbars, the overscroll area, and native form controls.
+  -->
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    html,
+    body {
+      background-color: #000;
+      color: #fff;
+    }
+    body {
+      margin: 0;
+    }
+  </style>
+  <title>Family Chat Hub</title>
+</head>
+
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
+</html>
