@@ -146,9 +146,9 @@ export const DEVICE_GROUPS: DeviceGroup[] = [
         id: "assistant_speak_up",
         kind: "toggle",
         section: "Assistant",
-        label: "Let it speak up on its own",
+        label: "Speak up on real alerts",
         description:
-          "When you have been quiet for a while, the assistant says something by itself. Switch it off and it only answers when you ask.",
+          "When a timer you set finishes or a reminder comes due, the assistant says it out loud in its own voice, from any screen. Switch it off and it only speaks when you ask it something.",
         default: true,
       },
       {

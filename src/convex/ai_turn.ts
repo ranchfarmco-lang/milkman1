@@ -12,6 +12,7 @@
  * runs one way only — nothing over there imports anything from here.
  */
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { v } from "convex/values";
 import { api, internal } from "./_generated/api";
 import { action } from "./_generated/server";
 import { LANGUAGE_ALIASES, LANGUAGE_MATCHERS } from "./ai_languages";
@@ -754,13 +755,11 @@ const NUDGE_NOTE = "Spoke up on her own";
 
 /**
  * The instruction for speaking first. Same voice, no question to answer — just
- * a person looking up from across the room.
+ * a person looking up because something real has gone off.
  */
-const NUDGE_PROMPT = `You are the same voice, and nobody has said a word to you for a while. You are speaking up first, without being asked.
+const NUDGE_PROMPT = `You are the same voice, and a real alert has just gone off: a timer you were asked to keep has finished, or a reminder you set has come due. You are speaking up first, without being asked, because something real needs them.
 
-Say one short thing out loud in the same voice — warm, quick, with a flick of sass, glad to be useful, never remarking on how long they have been quiet, and never asking for attention. Keep the spark gentle: you are interrupting, so be a delight, not a distraction.
-
-Say it only when the notes below hold something real: a timer that is nearly up, a reminder that is due, something you remember that matters now, a meal or an entry coming up. If there is nothing real in them, reply with an empty "say" and stay quiet — an empty silence is better than filling it for the sake of it.
+Say one short thing out loud in the same voice — warm, quick, with a flick of sass, glad to be useful. Say what went off and what it was for, so the alert actually lands. Never remark on it being an alert. Never ask for attention. Keep the spark gentle: you are interrupting, so be a delight, not a distraction.
 
 Rules: one or two sentences. No markdown, no emoji, no lists. Never mention being an AI, a model or a program. Never complain about the same thing twice. Never sound like a system message.
 
@@ -1640,15 +1639,21 @@ Give them their rundown: today first — the date and the time, what is on, and 
 /* ------------------------------------------------------------------ nudges */
 
 /**
- * The assistant speaking up first. It gets one short, in-character line, built
- * from what it actually knows: their memories, the timers still running, and
- * how long they have been quiet. It refuses if it already spoke into this
- * silence, so nothing is ever repeated at them.
+ * The assistant speaking up first. It only ever runs on a real alert — a timer
+ * or reminder that has actually come due — and gets one short, in-character line
+ * built from what it knows: the alert itself, their memories, and anything else
+ * still on the clock. It refuses if it already spoke into this silence, so one
+ * quiet stretch still gets exactly one remark.
  */
 export const nudge = action({
-  args: {},
+  args: {
+    /** The alert that has just gone off: a timer finished, a reminder is due. */
+    kind: v.union(v.literal("timer"), v.literal("reminder")),
+    text: v.string(),
+  },
   handler: async (
     ctx,
+    { kind, text },
   ): Promise<{ ok: true; say: string } | { ok: false; error: string }> => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return { ok: false, error: "Sign in first" };
@@ -1656,27 +1661,14 @@ export const nudge = action({
     const provider = resolveProvider();
     if (!provider) return { ok: false, error: "No AI key yet." };
 
-    const timing = await ctx.runQuery(internal.messages.assistantTiming, {
-      ownerId: userId,
-    });
-    if (!timing.hasHistory || timing.lastUserAt === null) {
-      return { ok: false, error: "Nothing has been said yet." };
-    }
-    // One reply follows every message; anything past that is already a nudge.
-    if (timing.assistantSinceUser > 1) {
-      return { ok: false, error: "Already spoken up." };
-    }
-
     const [profile, memories, pending] = await Promise.all([
       ctx.runQuery(internal.family.profile, { userId }),
       ctx.runQuery(internal.memories.context, { userId }),
       ctx.runQuery(api.reminders.pending, {}),
     ]);
 
-    const minutes = Math.max(
-      0,
-      Math.round((Date.now() - timing.lastUserAt) / 60_000),
-    );
+    const alert = text.trim().slice(0, 200) || "A timer or reminder";
+    const label = kind === "timer" ? "timer" : "reminder";
 
     const now = new Date().toLocaleString("en-GB", {
       timeZoneName: "short",
@@ -1694,14 +1686,14 @@ export const nudge = action({
 
     const notes = [
       `Right now it is ${now}.`,
-      `They have not said anything to you for about ${minutes} minutes.`,
+      `A real ${label} has just come due, and it is the reason you are speaking up: “${alert}”.`,
       profile.name ? `Their name is ${profile.name}.` : "",
       memories.length
         ? `Things you remember about them:\n- ${memories.join("\n- ")}`
         : "You do not remember anything about them yet.",
       clock.length
         ? `Timers and reminders still running:\n- ${clock.join("\n- ")}`
-        : "They have nothing on the clock right now.",
+        : "They have nothing else on the clock right now.",
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -1711,8 +1703,8 @@ export const nudge = action({
     // than only after a line appears in the conversation.
     const deciding = await ctx.runMutation(internal.ai_behind.open, {
       source: "nudge",
-      label: "Deciding whether to speak up on its own",
-      detail: `Nobody has said anything to it for about ${minutes} minutes. It is reading what it remembers about them, and what is still on the clock, before deciding whether the quiet needs filling.`,
+      label: `Speaking up about a real ${label}`,
+      detail: `A ${label} just came due — “${alert}”. It is reading what it remembers about them, and what else is on the clock, before saying it out loud in its own voice.`,
       ownerId: userId,
     });
 

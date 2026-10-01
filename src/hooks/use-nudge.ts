@@ -1,28 +1,22 @@
 import { api } from "@/convex/_generated/api";
+import { useReminders, type Reminder } from "@/hooks/use-reminders";
 import { useSettings } from "@/hooks/use-settings";
 import { useSpeechSynthesis } from "@/hooks/use-speech";
 import { useVoice } from "@/hooks/use-voice";
 import { sendNotification } from "@/lib/assistant-actions";
-import { useAction, useQuery } from "convex/react";
-import { useEffect, useRef } from "react";
+import { useAction } from "convex/react";
+import { useCallback, useRef } from "react";
 
 /**
- * How long the silence must last before each unprompted line, in order. One per
- * silence, and the gaps stretch out, so a living assistant never turns into a
- * nag. Do Not Disturb switches the whole thing off.
- */
-const GAPS_MS = [4 * 60_000, 15 * 60_000, 40 * 60_000];
-
-/** How often the silence is measured. */
-const CHECK_MS = 20_000;
-
-/**
- * Lets the assistant speak first — a little put out, a little fond — after the
- * person has gone quiet for a while. It runs wherever the app is open, and the
- * line is said out loud and shown as a notification unless sound is off.
+ * The assistant speaks up on its own only for a real alert — a timer that has
+ * finished or a reminder that has come due. Silence is never a reason to talk.
+ *
+ * Wherever the app is open, the alert itself always sounds. It is said out loud
+ * in the assistant's own voice when it is allowed to speak up and the house is
+ * not quiet; otherwise it rings plainly, so a timer is never swallowed. If the
+ * model cannot be reached, the plain alert is used instead.
  */
 export function useAssistantNudge() {
-  const rows = useQuery(api.messages.list, { room: "assistant" });
   const nudge = useAction(api.ai_turn.nudge);
 
   const { values } = useSettings();
@@ -36,44 +30,43 @@ export function useAssistantNudge() {
     resolved,
   });
 
-  // A nudge already in flight must not be asked for twice.
+  // A line already in flight must not be asked for twice at once.
   const running = useRef(false);
 
-  useEffect(() => {
-    if (quietHeld || !speakUp) return;
+  const onDue = useCallback(
+    (reminder: Reminder) => {
+      const title = reminder.kind === "timer" ? "Timer finished" : "Reminder";
+      const ring = () => {
+        speak(`${title}. ${reminder.text}`);
+        void sendNotification(title, reminder.text);
+      };
 
-    const timer = window.setInterval(() => {
-      if (running.current || !rows || rows.length === 0) return;
-
-      const lastUser = [...rows]
-        .reverse()
-        .find((row) => row.role === "user");
-      if (!lastUser) return;
-
-      // Replies beyond the first one to this message were spoken unprompted.
-      const since = rows.filter(
-        (row) => row.role === "assistant" && row.createdAt >= lastUser.createdAt,
-      ).length;
-      const alreadySpoken = Math.max(0, since - 1);
-      if (alreadySpoken >= GAPS_MS.length) return;
-
-      if (Date.now() - lastUser.createdAt < GAPS_MS[alreadySpoken]) return;
+      // The alarm always sounds; only the words change.
+      if (quietHeld || !speakUp || running.current) {
+        ring();
+        return;
+      }
 
       running.current = true;
-      void nudge({})
+      void nudge({ kind: reminder.kind, text: reminder.text })
         .then((result) => {
-          if (!result.ok) return;
+          if (!result.ok) {
+            ring();
+            return;
+          }
           speak(result.say);
           void sendNotification("Your assistant", result.say);
         })
-        .catch(() => {
-          // A line that does not arrive is not worth telling anyone about.
-        })
+        .catch(ring)
         .finally(() => {
           running.current = false;
         });
-    }, CHECK_MS);
+    },
+    [nudge, quietHeld, speak, speakUp],
+  );
 
-    return () => window.clearInterval(timer);
-  }, [nudge, quietHeld, rows, speak, speakUp]);
+  // Watching the clock is the job of `useReminders`; this only decides how the
+  // alert is voiced. It marks the alert done as soon as it comes due, wherever
+  // in the hub you happen to be.
+  useReminders({ onDue });
 }

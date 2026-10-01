@@ -435,6 +435,40 @@ export const clear = mutation({
       await ctx.db.delete(trace._id);
     }
 
+    // The preview half of an AI box is fed by more than the transcript, so
+    // emptying the box has to take the rest of its sources too. Without this
+    // the pane sits there still full and reads as a delete button that did
+    // nothing at all.
+    if (room !== "messenger") {
+      // What the hub did on its own — the board going out to its feeds, the
+      // morning pass over the calendar, the assistant speaking up — is shown
+      // inside this box, so it goes with it. The window is short-lived and
+      // refills the next time a job actually runs.
+      const behind = await ctx.db
+        .query("aiBehind")
+        .withIndex("by_at")
+        .order("desc")
+        .take(200);
+
+      for (const row of behind) {
+        if (row.ownerId === undefined || row.ownerId === userId) {
+          await ctx.db.delete(row._id);
+        }
+      }
+    }
+
+    // Only the builder has a bench, and it is what its preview renders. It is
+    // the same owner's work as the thread, so deleting the box deletes it
+    // rather than leaving the last build on screen.
+    if (room === "builder") {
+      const bench = await ctx.db
+        .query("files")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .collect();
+
+      for (const file of bench) await ctx.db.delete(file._id);
+    }
+
     return null;
   },
 });

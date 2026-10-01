@@ -5,7 +5,7 @@
  * answer it. This is the other half — what the hub does when nobody has asked
  * anything at all:
  *
- *   - the assistant deciding whether to speak up on its own;
+ *   - the assistant speaking up about a real alert;
  *   - the [LIVE] board going out to every feed on its timer;
  *   - the morning job copying the board onto the calendar.
  *

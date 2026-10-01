@@ -45,7 +45,7 @@ export default function AppShell({ children }: { children?: ReactNode } = {}) {
   usePresence();
   // The Control Room switches apply across the whole app, not just its page.
   useDeviceEffects();
-  // The assistant speaks up on its own, from any page, when you go quiet.
+  // The assistant speaks up on its own, from any page, only on a real alert.
   useAssistantNudge();
 
   // Everyone who can open the app belongs to the same family, so the messenger

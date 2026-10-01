@@ -26,7 +26,7 @@ import { useMemo, useState, type ReactNode } from "react";
  * lands here, in the order it happens:
  *
  *  - **Behind the scenes** — what the hub is doing when nobody asked it
- *    anything: deciding whether to speak up on its own, going out to every feed
+ *    anything: speaking up about a real alert, going out to every feed
  *    the [LIVE] board draws on, writing the morning board onto the calendar.
  *    Every line is written by the server while the job actually runs, so it is
  *    what the hub is doing rather than a log of what it did.
@@ -142,7 +142,7 @@ export function PreviewPanel({
   onAdd?: () => void;
 }) {
   // What the hub has been doing on its own — the board going out to its feeds,
-  // the assistant deciding to speak up, the morning pass over the calendar.
+  // the assistant speaking up about an alert, the morning pass over the calendar.
   //
   // The turn's own working travels with the reply it produced, so it is shown
   // once, in the conversation, rather than a second time here.
@@ -342,11 +342,11 @@ export function PreviewPanel({
 /**
  * The work nobody asked for, as it happens.
  *
- * The assistant deciding to speak up, the [LIVE] board going out to every feed
- * on its timer, the morning pass that writes the board onto the calendar — none
- * of it triggered by a person, and none of it otherwise visible. Each line is
- * written by the server while the job runs, so this is what the hub is doing,
- * not a log of what it did.
+ * The assistant speaking up about a real alert, the [LIVE] board going out to
+ * every feed on its timer, the morning pass that writes the board onto the
+ * calendar — none of it triggered by a person, and none of it otherwise
+ * visible. Each line is written by the server while the job runs, so this is
+ * what the hub is doing, not a log of what it did.
  */
 function BehindFeed({
   rows,

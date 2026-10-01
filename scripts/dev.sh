@@ -85,6 +85,12 @@ case "$BACKEND" in
       if [ -f .convex/local/default/config.json ]; then
         bun scripts/generate-auth-keys.mjs --local ||
           echo "dev: sign-in may fail — the local signing keys could not be set (see above)"
+
+        # The AI keys, for the same reason: this backend is a different
+        # deployment from the one the family configured, so without them every
+        # AI box falls back to a model on this machine and answers nothing.
+        bun scripts/sync-dev-ai-keys.mjs ||
+          echo "dev: the AI keys could not be copied from the deployment (see above)"
       fi
     fi
     ;;

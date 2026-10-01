@@ -42,7 +42,7 @@ const PAGES = [
     to: "/assistant",
     label: "AI Assistant",
     icon: Church,
-    line: "Ask it anything, or just talk. It looks things up, runs code, sets timers, passes messages on, reads the [LIVE] board back to you, gives you a rundown of the day and everything coming up, and speaks up on its own.",
+    line: "Ask it anything, or just talk. It looks things up, runs code, sets timers, passes messages on, reads the [LIVE] board back to you, gives you a rundown of the day and everything coming up, and speaks up on its own when a timer or reminder needs you.",
   },
   {
     to: "/builder",

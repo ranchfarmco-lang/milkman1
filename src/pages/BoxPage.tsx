@@ -21,15 +21,10 @@ import {
 import { api } from "@/convex/_generated/api";
 import { useChat } from "@/hooks/use-chat";
 import { useDictation, useSpeechSynthesis } from "@/hooks/use-speech";
-import { useReminders, type Reminder } from "@/hooks/use-reminders";
 import { useSettings } from "@/hooks/use-settings";
 import { useVoice } from "@/hooks/use-voice";
 import { buzz, chime, notifyMessage } from "@/lib/alerts";
-import {
-  runActions,
-  sendNotification,
-  toActions,
-} from "@/lib/assistant-actions";
+import { runActions, toActions } from "@/lib/assistant-actions";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery } from "convex/react";
 import {
@@ -396,17 +391,9 @@ function AssistantBox() {
     [canTalk, handsFree, run, sendMessage, setProblem, speak],
   );
 
-  const onReminderDue = useCallback(
-    (reminder: Reminder) => {
-      const title = reminder.kind === "timer" ? "Timer finished" : "Reminder";
-      void sendNotification(title, reminder.text);
-      if (canTalk) speak(`${title}. ${reminder.text}`);
-      setProblem(`${title}: ${reminder.text}`);
-    },
-    [canTalk, speak, setProblem],
-  );
-
-  const reminders = useReminders({ onDue: onReminderDue });
+  // The alerts themselves are sounded app-wide by the assistant shell; here the
+  // list is only read, so the next timer is shown without ringing twice.
+  const reminders = useQuery(api.reminders.pending) ?? [];
 
   // Pause the microphone while the model is working or talking, so it never
   // hears itself and never sends the same sentence twice.

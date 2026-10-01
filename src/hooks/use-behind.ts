@@ -5,7 +5,7 @@ import { useQuery } from "convex/react";
 export type BehindRow = {
   id: string;
   at: number;
-  /** nudge, board or calendar — which job this was. */
+  /** alert nudge, board or calendar — which job this was. */
   source: string;
   label: string;
   detail: string | null;
