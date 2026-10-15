@@ -1,0 +1,23 @@
+{
+  "name": "webengine",
+  "version": "0.1.0",
+  "about": "The rendering and script engine the OS browser uses for full page rendering. This recipe is the integration point: installing it upgrades NovaBrowser from a structured document reader to a full visual browser.",
+  "depends": [],
+  "integrationPoint": {
+    "component": "os/browser/engine.ts",
+    "class": "NovaBrowser",
+    "note": "NovaBrowser implements transport, HTML parsing, navigation and downloads itself. A rendering engine supplies layout, painting and a script runtime. When this package is installed, NovaBrowser renders the parsed document through the engine instead of showing it as text.",
+    "contract": [
+      "render(html: string, url: string, viewport: { width: number; height: number }): { pixels: Uint8Array; links: { href: string; rect: number[] }[] }",
+      "runScripts: boolean, executed in the engine's own sandbox",
+      "The engine must not be granted access to the OS bus or the filesystem."
+    ]
+  },
+  "files": [
+    {
+      "path": "usr/lib/nova/webengine/README",
+      "text": "Place the rendering engine's shared objects and resources here. The OS loads it by path, never by installing anything system-wide.\n"
+    }
+  ],
+  "check": "test -f usr/lib/nova/webengine/README"
+}

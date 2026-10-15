@@ -15,7 +15,12 @@
     "libraries": "scripts/install-libraries.sh",
     "agents": "scripts/install-agents.sh",
     "models": "scripts/download-models.sh",
-    "source": "scripts/capture-freebuff-source.sh"
+    "source": "scripts/capture-freebuff-source.sh",
+    "this_app": "scripts/capture-this-app.sh"
+  },
+  "already_in_this_download": {
+    "source/freebuff-source.zip": "the Freebuff (Codebuff) reference source, Apache-2.0 — 1,773 files",
+    "source/this-app-source.zip": "the hub's own app: every page and Convex function, the shell, the desktop browser, the native host, NOVA OS and the docs, plus the two generated halves of its own snapshot so the unpacked copy builds as it stands"
   },
   "capabilities": {
     "reason": [
@@ -87,7 +92,11 @@
     "select-tools": ["source: source/freebuff/packages/agent-runtime/src/run-agent-step.ts", "orchestration: MCP, LiteLLM"],
     "select-models": ["source: source/freebuff/sdk/src/impl/model-provider.ts", "orchestration: LiteLLM"],
     "execute-coding-tasks": ["agents: aider, OpenHands, SWE-agent, Goose, plandex"],
-    "build-applications": ["agents: gpt-engineer, OpenHands, codex-cli; supporting: node/bun/python/rust toolchains"]
+    "build-applications": ["agents: gpt-engineer, OpenHands, codex-cli; supporting: node/bun/python/rust toolchains"],
+    "run-the-hub-itself": [
+      "source/app: the hub's own application, in this download as source/this-app-source.zip",
+      "self-hosting: bun run own — its own Convex backend and database on this machine"
+    ]
   },
   "licenses_note": "Every component here is open source or open weight. Model licenses are listed in models/manifest.json; several (Llama, Gemma) are gated and require accepting the license on Hugging Face and authenticating with `hf auth login`."
 }

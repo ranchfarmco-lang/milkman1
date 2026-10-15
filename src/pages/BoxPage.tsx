@@ -1,4 +1,11 @@
 import { AddContactDialog } from "@/components/AddContactDialog";
+import {
+  BuilderAppsPanel,
+  BuilderSandboxPreview,
+} from "@/components/BuilderApps";
+import { BuilderBuildLog } from "@/components/BuilderBuildLog";
+import { BuilderCrewPanel } from "@/components/BuilderCrewPanel";
+import { BuilderWorkbench } from "@/components/BuilderWorkbench";
 import { CallTest } from "@/components/CallTest";
 import { useCallStage } from "@/components/CallProvider";
 import { ConferenceRoom } from "@/components/ConferenceRoom";
@@ -19,18 +26,20 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { api } from "@/convex/_generated/api";
+import { useAgentActions } from "@/hooks/use-agent-actions";
+import { useAppRunner } from "@/hooks/use-app-runner";
 import { useChat } from "@/hooks/use-chat";
 import { useDictation, useSpeechSynthesis } from "@/hooks/use-speech";
+import { useStudioVoice } from "@/hooks/use-studio-voice";
 import { useSettings } from "@/hooks/use-settings";
 import { useVoice } from "@/hooks/use-voice";
 import { buzz, chime, notifyMessage } from "@/lib/alerts";
-import { runActions, toActions } from "@/lib/assistant-actions";
+import { AssistantIcon } from "@/lib/assistant-mark";
 import { cn } from "@/lib/utils";
-import { useMutation, useQuery } from "convex/react";
+import { useQuery } from "convex/react";
 import {
+  ArrowDown,
   ArrowLeftRight,
-  Church,
-  Hammer,
   MessageCircle,
   Mic,
   MicOff,
@@ -43,7 +52,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useNavigate } from "react-router";
 
 export type BoxKey = "assistant" | "builder" | "messenger";
 
@@ -57,36 +65,6 @@ const MONO: PanelAccent = {
 
 const NO_KEY_NOTICE =
   "Nothing for the AI to talk to — the Control Room lists every system this hub can reach and the variable each one asks for, and any of them can be pasted into the Keys tab. The free public systems and a model on this machine need no key at all.";
-
-/** Both AIs change things the same way: the page does it when the reply lands. */
-function useAgentActions() {
-  const navigate = useNavigate();
-  const setDisplayName = useMutation(api.family.setDisplayName);
-  const createEvent = useMutation(api.calendar.fromAssistant);
-  const planShopping = useMutation(api.calendar.shopFromAssistant);
-  const [problem, setProblem] = useState<string | null>(null);
-
-  const run = useCallback(
-    async (rawActions: unknown) => {
-      const actions = toActions(rawActions);
-      if (!actions.length) return;
-
-      await runActions(actions, {
-        navigate: (path) => navigate(path),
-        setMyName: (name) => setDisplayName({ name }),
-        // Both of these go to the server, which is where the audience tiers and
-        // who-is-actually-in-this-family are decided — the page is only the
-        // hands that carry the action there.
-        createEvent: (draft) => createEvent(draft),
-        planShopping: (draft) => planShopping(draft),
-        onProblem: setProblem,
-      });
-    },
-    [navigate, setDisplayName, createEvent, planShopping],
-  );
-
-  return { run, problem, setProblem };
-}
 
 /**
  * Alert on messages the rest of the family sends: buzz, chime and a system
@@ -227,128 +205,174 @@ function BigMicButton({
 
 /* ------------------------------------------------------------ ai builder */
 
+/**
+ * The chain between the boxes, said once rather than four times.
+ *
+ * The AI Builder page is read top to bottom as one job: a request goes in, the
+ * build is watched, the app is run and tested, and it is kept until it is
+ * finished. These little steps between the boxes are what makes that a chain
+ * rather than a stack — each one names the next box and scrolls to it, so the
+ * flow is visible and navigable at the same time.
+ */
+function ChainStep({ to, children }: { to: string; children: ReactNode }) {
+  return (
+    <div className="flex justify-center">
+      <a
+        href={`#${to}`}
+        className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-background/40 px-2.5 py-1 text-[9px] text-muted-foreground transition-colors hover:border-white/30 hover:text-foreground"
+      >
+        <ArrowDown className="size-3 shrink-0" />
+        {children}
+      </a>
+    </div>
+  );
+}
+
 function BuilderBox() {
-  const { messages, thinking, error, sendMessage, clearRoom, aiReady } =
-    useChat("builder");
-  const { run, problem, setProblem } = useAgentActions();
-
-  const [dictating, setDictating] = useState(false);
-  const [working, setWorking] = useState(false);
-
-  const busy = thinking || working;
-
-  const handleSend = useCallback(
-    async (text: string) => {
-      setProblem(null);
-      setWorking(true);
-      const result = await sendMessage(text);
-      setWorking(false);
-      // The builder can act on the app as well as answer in code.
-      if (result?.ok) await run(result.actions);
-    },
-    [run, sendMessage, setProblem],
-  );
-
-  const {
-    supported: canListen,
-    listening,
-    interim,
-    error: micError,
-  } = useDictation({
-    active: dictating,
-    muted: busy,
-    onFinal: (text) => {
-      void handleSend(text);
-    },
-  });
-
-  const aiOffline = aiReady === false;
-  const [swapped, setSwapped] = useState(false);
-
-  const inputPanel = (
-    <MessagePanel
-      title="AI Builder"
-      subtitle="Say what you want made — this side is the conversation"
-      icon={Hammer}
-      accent={MONO}
-      placeholder="Describe what you want to build…"
-      emptyTitle="Nothing said yet"
-      emptyHint="Say what you want made. The back-and-forth stays here; what it builds goes to the Preview."
-      status={
-        aiOffline
-          ? "Not connected"
-          : dictating
-            ? "Listening"
-            : thinking
-              ? "Working"
-              : "Idle"
-      }
-      room="builder"
-      messages={messages}
-      onSend={handleSend}
-      onClear={clearRoom}
-      thinking={busy}
-      notice={error ?? problem ?? micError ?? (aiOffline ? NO_KEY_NOTICE : null)}
-      inputLeading={
-        <BigMicButton
-          on={dictating}
-          canListen={canListen}
-          onToggle={() => setDictating((on) => !on)}
-        />
-      }
-      footer={
-        dictating ? (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border/60 px-4 py-2 text-[9px] leading-4 text-muted-foreground">
-            <span className="flex items-center gap-1.5">
-              <span
-                className={cn(
-                  "size-1.5 rounded-full",
-                  !busy && listening ? "bg-white" : "bg-white/30",
-                )}
-              />
-              {busy ? "Working…" : listening ? "Listening…" : "Paused"}
-            </span>
-            {interim ? (
-              <span className="truncate text-foreground/70 italic">
-                {interim}
-              </span>
-            ) : null}
-          </div>
-        ) : null
-      }
-    />
-  );
+  // Which app is in the sandbox frame — one fact, read by the home screen's
+  // icons and by the preview box below, so pressing an icon and the frame are
+  // the same state rather than two that can disagree.
+  const runner = useAppRunner();
 
   return (
-    <SplitScreen
-      swapped={swapped}
-      input={inputPanel}
-      preview={
-        <>
-          <PreviewPanel
-            title="Preview"
-            subtitle="What it is doing, and the code, documents and apps it makes"
-            icon={Hammer}
-            accent={MONO}
-            room="builder"
-            onClear={clearRoom}
-            messages={messages}
-            thinking={busy}
-            emptyTitle="Nothing built yet"
-            emptyHint="Describe an idea and everything it produces lands here — the chat keeps the conversation."
-            headerAction={
-              <SwapSidesButton
-                swapped={swapped}
-                onSwap={() => setSwapped((side) => !side)}
-              />
-            }
-          />
+    /*
+     * The whole AI Builder page, as five boxes with one job each — and one
+     * chain through them, in the order the work happens.
+     *
+     * There used to be eight boxes, and several of them answered the same
+     * question: a chat that asked the AI for things beside a brief that built
+     * them, a "what it made" preview beside the sandbox that runs the app, a
+     * shelf of cards with a full toolbar each above a bench that listed the
+     * same apps again — and the two boxes that had to agree about what was
+     * running were the two most likely to disagree. Now:
+     *
+     *   1. **AI app builder (prompt studio)** — where it starts: the one request
+     *      box, the agent behind it, and the conversation. A brief goes in, the
+     *      crew works, the reply is written into the box's own thread, and every
+     *      request after the first is a *change* to the app on the bench.
+     *   2. **Build Code Log** — what is happening while it happens: every line
+     *      the crew writes and everything the sandbox printed, with the name of
+     *      the app on the bench, a jump to the preview, and Stop for the run.
+     *   3. **Preview & Test Sandbox** — run it and test it, and change this app
+     *      itself: the box holds two things and says which with a switch.
+     *      **Apps it made** is the app itself, running — run, refresh, device
+     *      view, a real element inspector, full screen; what the build reported
+     *      is said here too, with a link back to the log that said it, and an
+     *      element picked in the frame can be handed straight to the prompt box
+     *      above as "change this". **This app — its mirror** is the hub itself:
+     *      a copy of this whole project on the workshop machine, where a change
+     *      to the hub is written, typechecked and built before anybody carries
+     *      it in. Two jobs, one sandbox, because both of them happen here.
+     *   4. **Saved Projects** — where every build waits: run it, edit it, hand-
+     *      edit its files, or Publish to Home Screen.
+     *   5. **App icons** — the home screen, at the end because that is where the
+     *      chain ends: rounded squares with a logo and a name, the way a phone
+     *      holds its apps. Pressing one launches it in the preview above.
+     *
+     * The order is the flow, and the little steps between the boxes (and the
+     * numbered strip at the top) are what say so: each names the next box and
+     * scrolls to it. Nothing here is decoration — pressing an icon really does
+     * put that app in the frame above, the log really is the run that the
+     * prompt box started, and the preview really is the app the run published.
+     *
+     * The page is long on purpose, and the whole page scrolls. Every box is
+     * given a real height of its own rather than sharing the viewport with the
+     * others: when six boxes were fitted into one screen each of them got a
+     * sliver and a scrollbar of its own, and the box that needs the most room —
+     * the sandbox a built app runs in — got the least. Scrolling down is
+     * cheaper than a preview too small to see.
+     *
+     * The sandbox and Saved Projects sit side by side only when the box is
+     * genuinely wide enough for two columns; below that they stack, full width.
+     * The decision is this container's own rather than the window's: the page
+     * can be sitting in a narrow frame on a wide screen, and a window breakpoint
+     * would call that a phone.
+     */
+    <div className="@container flex h-full min-h-0 flex-col gap-4 overflow-y-auto">
+      {/* The chain, in one line, before anything else: what the page does, in
+          the order it does it. Each chip is a link to its box. */}
+      <nav
+        aria-label="How the AI Builder page works"
+        className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-2xl border border-white/20 bg-card/60 px-3 py-2 text-[9px] text-muted-foreground backdrop-blur-sm"
+      >
+        {[
+          ["1", "builder-studio", "Ask"],
+          ["2", "builder-log", "Watch"],
+          ["3", "builder-preview", "Run it, test it, or change this app"],
+          ["4", "builder-projects", "Keep"],
+          ["5", "builder-apps", "Publish"],
+        ].map(([step, id, label], index) => (
+          <span key={id} className="flex items-center gap-1.5">
+            {index > 0 ? (
+              <span className="text-muted-foreground/50">→</span>
+            ) : null}
+            <a
+              href={`#${id}`}
+              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background/40 px-2 py-0.5 transition-colors hover:border-white/30 hover:text-foreground"
+            >
+              <span className="font-medium text-foreground/80">{step}</span>
+              {label}
+            </a>
+          </span>
+        ))}
+        <span className="ml-auto hidden @3xl:inline">
+          one request · the live build · the app running · what is kept · what
+          is finished
+        </span>
+      </nav>
 
-          {/* Its own box, under the preview: the hub's live connection. */}
-          <ConnectionPanel />
-        </>
-      }
-    />
+      {/* 1 — The prompt studio: one brief, one press, and the crew goes to
+          work. The only place a request is put in on this page, and where the
+          answering happens. */}
+      <BuilderCrewPanel runner={runner} />
+
+      {/* The hand-off to the box that shows the work. */}
+      <ChainStep to="builder-log">
+        the crew writes here, and the log below shows every step as it happens
+      </ChainStep>
+
+      {/* 2 — The log: what the crew is doing as it does it, and what the
+          sandbox said about what they wrote. A terminal wants width, so it
+          takes the whole row. */}
+      <div className="flex h-[18rem] min-h-0 shrink-0 flex-col @3xl:h-[22rem]">
+        <BuilderBuildLog />
+      </div>
+
+      {/* The hand-off to the app itself, and to the other half of the page:
+          the same sandbox holds this project's own copy, and its switch is how
+          a change to the hub is asked for, checked and carried in. */}
+      <ChainStep to="builder-preview">
+        what it built, running — press Run there, or an icon at the bottom.
+        Switch it to “This app — its mirror” to change the hub itself, in a copy
+        of it
+      </ChainStep>
+
+      {/* 3 and 4 — where it runs, and where it waits until it is ready. The
+          sandbox takes the room it needs and grows with the screen; Saved
+          Projects is a definite column, because a file tree wants the height. */}
+      <div className="flex flex-col gap-4 @6xl:flex-row @6xl:items-stretch">
+        <div className="flex h-[34rem] min-h-0 min-w-0 flex-col @6xl:h-[48rem] @6xl:flex-1">
+          <BuilderSandboxPreview runner={runner} />
+        </div>
+
+        <div className="flex h-[34rem] min-h-0 min-w-0 flex-col @6xl:h-[48rem] @6xl:w-[30rem] @6xl:shrink-0">
+          <BuilderWorkbench runner={runner} />
+        </div>
+      </div>
+
+      {/* The hand-off to where finished apps live. */}
+      <ChainStep to="builder-apps">
+        finished? Publish to Home Screen, and it lands here as an icon
+      </ChainStep>
+
+      {/* 5 — The home screen: what has been made, as icons, and the way to
+          launch any of it. As tall as its icons need, up to a point — past
+          that it scrolls itself, so the chain above is never pushed off the
+          page by a family with twenty apps. */}
+      <div className="flex max-h-[32rem] min-h-0 shrink-0 flex-col overflow-y-auto @3xl:max-h-[38rem]">
+        <BuilderAppsPanel runner={runner} />
+      </div>
+    </div>
   );
 }
 
@@ -360,6 +384,9 @@ function AssistantBox() {
   const { run, problem, setProblem } = useAgentActions();
   const { values: deviceSettings } = useSettings();
   const { resolved: voice } = useVoice();
+  // The studio voice, if one is connected: the messenger's box speaks with the
+  // same model the assistant does rather than a different-sounding engine.
+  const studio = useStudioVoice();
 
   const {
     speak,
@@ -369,6 +396,7 @@ function AssistantBox() {
   } = useSpeechSynthesis({
     enabled: !(deviceSettings.silence ?? false),
     resolved: voice,
+    studio,
   });
 
   const [handsFree, setHandsFree] = useState(false);
@@ -385,10 +413,14 @@ function AssistantBox() {
 
       if (!result?.ok) return;
 
-      if (handsFree && canTalk) speak(result.say);
+      // The assistant reads its answers out loud, exactly as the Control
+      // Room's Silence switch promises to mute. Silence is handled inside
+      // `speak`; hands-free only decides whether the microphone is open, so a
+      // typed question is still answered in its own voice.
+      if (canTalk) speak(result.say);
       await run(result.actions);
     },
-    [canTalk, handsFree, run, sendMessage, setProblem, speak],
+    [canTalk, run, sendMessage, setProblem, speak],
   );
 
   // The alerts themselves are sounded app-wide by the assistant shell; here the
@@ -441,7 +473,7 @@ function AssistantBox() {
           ? "Hands-free — this side is the conversation"
           : "Ask anything — this side is the conversation"
       }
-      icon={Church}
+      icon={AssistantIcon}
       accent={MONO}
       placeholder={
         handsFree
@@ -515,7 +547,7 @@ function AssistantBox() {
           <PreviewPanel
             title="Preview"
             subtitle="Its thinking, and what it produces"
-            icon={Church}
+            icon={AssistantIcon}
             accent={MONO}
             room="assistant"
             onClear={clearRoom}

@@ -283,6 +283,7 @@ both.
 | GET/POST | `/api/v1/tools`, `/api/v1/tools/run` | the tools, and running one |
 | GET/POST/DELETE | `/api/v1/memory` | search, list, remember, forget |
 | GET | `/api/v1/models` | model servers and their models |
+| POST | `/api/v1/completions` | `{url, headers, payload}` — one chat request asked of a local model server, handed back untouched. This is how a hub page over https reaches a model on this machine: only loopback, only a port a model server here uses, only a chat route. |
 | GET/POST | `/api/v1/connectors` | the registry, switching on, keys |
 | GET | `/api/v1/hierarchy` | how ready each information tier is |
 | POST | `/api/v1/info` | walk the hierarchy |

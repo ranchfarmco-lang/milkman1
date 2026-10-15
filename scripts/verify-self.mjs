@@ -22,10 +22,10 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 
-import { SELF_SNAPSHOT_AT, SELF_SOURCE } from "../src/convex/self_source.ts";
+import { SELF_OMITTED, SELF_SNAPSHOT_AT, SELF_SOURCE } from "../src/convex/self_source.ts";
 import { readOwnCode, patchOwnCode } from "../src/convex/ai_self.ts";
 import { cleanPath } from "../src/convex/workspace.ts";
-import { collectFiles } from "./snapshot-self.mjs";
+import { MAX_SNAPSHOT_BYTES, collectFiles } from "./snapshot-self.mjs";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 
@@ -232,13 +232,63 @@ check("a leading ./ is tolerated when naming a file", () => {
 
 /* --- 4. The snapshot is the real, current project ------------------------- */
 
-const ON_DISK = (await collectFiles()).map(rel).sort();
+/**
+ * Everything on disk the snapshot should carry.
+ *
+ * The cap in `snapshot-self.mjs` may have left whole tiers out — when it does,
+ * it names them in `SELF_OMITTED` rather than dropping them in silence. Those
+ * paths are expected to be absent, and every one of them is still checked to
+ * be a real file that really is missing from the snapshot, so an omission can
+ * never smuggle in a file that simply went stale unnoticed.
+ */
+const OMITTED = new Set(SELF_OMITTED);
+const ALL_ON_DISK = (await collectFiles()).map(rel);
+const ON_DISK = ALL_ON_DISK.filter((path) => !OMITTED.has(path)).sort();
 const IN_SNAPSHOT = Object.keys(SELF_SOURCE).sort();
+
+/** The browser's twin, read up front so the checks below stay synchronous. */
+const TWIN = await readFile(join(ROOT, "public", "self-source.json"), "utf8")
+  .then((text) => JSON.parse(text))
+  .catch(() => null);
 
 check("the snapshot was taken at a believable time", () => {
   const taken = Date.parse(SELF_SNAPSHOT_AT);
   assert.ok(Number.isFinite(taken), `SELF_SNAPSHOT_AT is not a date: ${SELF_SNAPSHOT_AT}`);
   assert.ok(taken <= Date.now() + 60_000, "snapshot is dated in the future");
+});
+
+check("every omitted path is a real file that is genuinely absent", () => {
+  const onDisk = new Set(ALL_ON_DISK);
+  const bogus = SELF_OMITTED.filter((path) => !onDisk.has(path) || path in SELF_SOURCE);
+  assert.deepEqual(
+    bogus,
+    [],
+    `SELF_OMITTED names something that is not a skipped-on-disk file: ${bogus.join(", ")}`,
+  );
+});
+
+check("the snapshot holds the cap it is meant to hold", () => {
+  const bytes = IN_SNAPSHOT.reduce((sum, path) => sum + SELF_SOURCE[path].length, 0);
+  assert.ok(
+    bytes <= MAX_SNAPSHOT_BYTES,
+    `snapshot is ${bytes} characters, over the ${MAX_SNAPSHOT_BYTES} cap — run: bun run snapshot:self`,
+  );
+});
+
+check("the browser's twin says the same thing as the module", () => {
+  assert.ok(TWIN, "public/self-source.json is missing — run: bun run snapshot:self");
+  assert.equal(TWIN.at, SELF_SNAPSHOT_AT, "twin has a different snapshot date");
+  assert.deepEqual(TWIN.omitted, SELF_OMITTED, "twin omits different files");
+  assert.deepEqual(
+    Object.keys(TWIN.files).sort(),
+    IN_SNAPSHOT,
+    "twin holds different files — run: bun run snapshot:self",
+  );
+  assert.equal(
+    TWIN.files[SELF_PATH],
+    SELF_SOURCE[SELF_PATH],
+    "twin's copy of a file differs from the module's",
+  );
 });
 
 check("the snapshot covers every file it should", () => {

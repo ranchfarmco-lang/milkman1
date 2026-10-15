@@ -12,6 +12,7 @@ import { isUnlocked } from "./guard";
 import {
   ELSEWHERE,
   RANCH_STORES,
+  type LiveLink,
   aqiWord,
   compassWord,
   kpWord,
@@ -31,10 +32,12 @@ import {
  * declarations, the energy, metals and farm markets the state sells into, the
  * wider economy, the markets, power's inputs, aircraft overhead, earthquakes,
  * the station and the space weather, and the headlines — Colorado, roads,
- * avalanche country, and the world. Each source is fetched independently and
- * may fail on its own: one dead feed leaves one tile saying so, and never blanks
- * the page. It is refreshed on a timer by `crons.ts` and on demand from the
- * page's Refresh.
+ * avalanche country, and the world. It also keeps the three hometowns —
+ * Grand Junction, Rifle and Cañon City — reading their papers, city calendars,
+ * classifieds and event feeds at 5am each morning and writing the morning
+ * rundown at 8. Each source is fetched independently and may fail on its own:
+ * one dead feed leaves one tile saying so, and never blanks the page. It is
+ * refreshed on a timer by `crons.ts` and on demand from the page's Refresh.
  *
  * Some things genuinely cannot be fetched by anything but a browser — the AAA
  * pump price, the COtrip road colours, the CAIC danger rose, the WECC grid.
@@ -54,7 +57,7 @@ const TIMEOUT_MS = 12_000;
 const SLOW_TIMEOUT_MS = 15_000;
 
 /** The one row the cron writes and the page reads. */
-const KEY = "live-v3";
+const KEY = "live-v5";
 
 /* ------------------------------------------------------------------ shapes */
 
@@ -219,6 +222,65 @@ export type NewsItem = {
   at: number | null;
 };
 
+/** One thing found in one of the hub's three hometowns. */
+export type LocalItem = {
+  kind: "news" | "sale" | "event";
+  title: string;
+  link: string;
+  /** The outlet that wrote it, or the calendar it came from. */
+  from: string;
+  /** When it was published, or the calendar day it happens — a date, for events. */
+  at: number | null;
+};
+
+export type LocalTown = {
+  name: string;
+  /** Where a person starts reading about it. */
+  home: string;
+  /** The sources that answered, named on the page. */
+  read: string[];
+  /** The sources that refused, named rather than hidden. */
+  refused: string[];
+  news: LocalItem[];
+  sales: LocalItem[];
+  events: LocalItem[];
+};
+
+/**
+ * The three hometowns, watched: Grand Junction, Rifle and Cañon City.
+ *
+ * A server can read the papers, the city calendars and the classified feeds;
+ * a server cannot open Facebook or the sale boards, so those are carried as
+ * one-click links rather than faked.
+ */
+export type LocalWatch = {
+  at: number;
+  towns: LocalTown[];
+  links: LiveLink[];
+  /**
+   * Pipelines that do not have two independent sources, in words — what is
+   * thin, which town it leaves blank, and that it needs the developer to find
+   * another pipe. Empty on a day when every pipeline is covered.
+   */
+  attention: string[];
+};
+
+/** One line of the morning rundown, written to be read — on the page or out loud. */
+export type RundownLine = {
+  place: string;
+  /** Whether the line is a headline, a sale, or something happening. */
+  kind: LocalItem["kind"];
+  text: string;
+  href: string | null;
+  at: number | null;
+};
+
+/** The 5am local check, written as the 8am rundown. */
+export type Rundown = {
+  at: number;
+  lines: RundownLine[];
+};
+
 export type HayPrice = {
   region: string;
   commodity: string;
@@ -318,6 +380,10 @@ export type Briefing = {
   avalanche: Source<NewsItem[]>;
   wildfire: Source<NewsItem[]>;
   world: Source<NewsItem[]>;
+  /** Grand Junction, Rifle and Cañon City — papers, calendars, sales, events. */
+  local: Source<LocalWatch>;
+  /** The 5am check, written as the 8am rundown. */
+  rundown: Source<Rundown>;
   hay: Source<HayReport>;
   horseAuctions: Source<AuctionEvent[]>;
   equipmentAuctions: Source<AuctionEvent[]>;
@@ -1397,6 +1463,18 @@ function tag(block: string, name: string): string {
 }
 
 /**
+ * A headline as plain text. Some feeds put markup inside the title element
+ * itself — "Glenwood Springs<br/>Join us this weekend…" — and a tag belongs in
+ * a page, not in a sentence somebody reads out loud.
+ */
+function cleanTitle(text: string): string {
+  return text
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * A newsroom publishes ordinary RSS; this reads it into plain rows.
  *
  * The outlets are named rather than searched: Google News refuses to answer the
@@ -1412,7 +1490,7 @@ async function news(
 
   const items: NewsItem[] = [];
   for (const block of xml.split("<item>").slice(1)) {
-    const raw = tag(block, "title");
+    const raw = cleanTitle(tag(block, "title"));
     if (!raw) continue;
     const published = tag(block, "pubDate");
     items.push({
@@ -1652,6 +1730,445 @@ async function cattleAuctions(): Promise<AuctionReport[]> {
   return out.slice(0, 14);
 }
 
+/* ------------------------------------------------------------- the hometowns */
+
+/**
+ * Grand Junction, Rifle and Cañon City — the three towns the family named.
+ *
+ * Every source here is a named feed, not a search: a newspaper's own feed
+ * answers a server, while a search page, Facebook and the sale boards answer
+ * only a browser — those are carried as one-click links instead of faked.
+ * `match` keeps a regional feed honest: an item from the Colorado Springs or
+ * state wires is kept only when it names the town, so another city's news
+ * never arrives wearing this town's name.
+ */
+type TownFeed = {
+  url: string;
+  outlet: string;
+  match?: RegExp;
+  /**
+   * Set when a feed is known to refuse every server, with the reason. It is
+   * still read and still named when it refuses, so the page keeps telling the
+   * truth; the flag only makes sure it is called out for the person rather than
+   * quietly disappearing from the count.
+   */
+  blocked?: string;
+};
+type TownCalendar = { url: string; from: string };
+type TownSaleFeed = { url: string; from: string };
+type TownSource = {
+  name: string;
+  /** Where a person starts reading about it. */
+  home: string;
+  news: TownFeed[];
+  events: TownCalendar[];
+  sales: TownSaleFeed[];
+  /** What only a signed-in browser can open. */
+  links: LiveLink[];
+};
+
+const TOWNS: TownSource[] = [
+  {
+    name: "Grand Junction",
+    home: "https://www.westernslopenow.com/",
+    news: [
+      {
+        url: "https://www.westernslopenow.com/feed/",
+        outlet: "Western Slope Now",
+      },
+      {
+        url: "https://www.gjcity.org/RSSFeed.aspx?ModID=1&CID=All-newsflash.xml",
+        outlet: "City of Grand Junction",
+      },
+      {
+        url: "https://www.bing.com/news/search?q=%22grand+junction%22+colorado&format=RSS",
+        outlet: "Bing News — Grand Junction",
+        match: /grand junction|mesa county|western slope/i,
+      },
+    ],
+    events: [
+      {
+        url: "https://www.gjcity.org/RSSFeed.aspx?ModID=58&CID=All-calendar.xml",
+        from: "Grand Junction city calendar",
+      },
+    ],
+    sales: [
+      {
+        url: "https://grandjunction.craigslist.org/search/gms?format=rss",
+        from: "Craigslist — Grand Junction",
+      },
+    ],
+    links: [
+      {
+        label: "Yard sales — Grand Junction",
+        href: "https://grandjunction.craigslist.org/search/gms",
+        why: "Craigslist refuses servers; it opens in a browser.",
+      },
+      {
+        label: "Facebook Marketplace — Grand Junction",
+        href: "https://www.facebook.com/marketplace/search/?query=yard%20sale%20grand%20junction",
+        why: "Facebook only opens for a signed-in person.",
+      },
+      {
+        label: "Facebook events — Grand Junction",
+        href: "https://www.facebook.com/search/events/?q=Grand%20Junction%20Colorado",
+        why: "Facebook's events are behind the sign-in wall.",
+      },
+      {
+        label: "Daily Sentinel — classifieds",
+        href: "https://www.gjsentinel.com/classifieds/sale/",
+        why: "The paper's own sale listings, read in a browser.",
+      },
+    ],
+  },
+  {
+    name: "Rifle",
+    home: "https://www.postindependent.com/",
+    news: [
+      {
+        url: "https://www.postindependent.com/feed/",
+        outlet: "Post Independent & Citizen Telegram",
+      },
+      {
+        url: "https://www.rifleco.org/RSSFeed.aspx?ModID=1&CID=All-newsflash.xml",
+        outlet: "City of Rifle",
+      },
+      {
+        url: "https://www.bing.com/news/search?q=rifle+colorado+garfield+county&format=RSS",
+        outlet: "Bing News — Rifle",
+        match: /rifle|garfield county|new castle|silt|parachute|glenwood springs/i,
+      },
+    ],
+    events: [
+      {
+        url: "https://www.rifleco.org/RSSFeed.aspx?ModID=58&CID=All-calendar.xml",
+        from: "Rifle city calendar",
+      },
+    ],
+    sales: [
+      {
+        url: "https://westslope.craigslist.org/search/gms?format=rss",
+        from: "Craigslist — Western Slope",
+      },
+      {
+        url: "https://classifieds.cmnm.org/cmnm/category/garage-estate-sales-auctions/garage-estate-sale/rss.xml",
+        from: "Western Slope garage & estate sales",
+      },
+    ],
+    links: [
+      {
+        label: "Yard sales — Rifle & the Western Slope",
+        href: "https://westslope.craigslist.org/search/gms",
+        why: "Craigslist refuses servers; it opens in a browser.",
+      },
+      {
+        label: "Facebook Marketplace — Rifle",
+        href: "https://www.facebook.com/marketplace/search/?query=yard%20sale%20rifle%20colorado",
+        why: "Facebook only opens for a signed-in person.",
+      },
+      {
+        label: "Facebook events — Rifle",
+        href: "https://www.facebook.com/search/events/?q=Rifle%20Colorado",
+        why: "Facebook's events are behind the sign-in wall.",
+      },
+      {
+        label: "Garage & estate sales — the Western Slope board",
+        href: "https://classifieds.cmnm.org/cmnm/category/garage-estate-sales-auctions/garage-estate-sale",
+        why: "The Post Independent's own garage-sale classifieds.",
+      },
+    ],
+  },
+  {
+    name: "Cañon City",
+    home: "https://www.canoncity.org/",
+    news: [
+      {
+        url: "https://www.canoncitydailyrecord.com/feed/",
+        outlet: "Cañon City Daily Record",
+        blocked: "it answers 403 to every server, so no server can read it",
+      },
+      {
+        url: "https://www.canoncity.org/RSSFeed.aspx?ModID=1&CID=All-newsflash.xml",
+        outlet: "City of Cañon City",
+      },
+      {
+        url: "https://www.bing.com/news/search?q=%22ca%C3%B1on+city%22+colorado&format=RSS",
+        outlet: "Bing News — Cañon City",
+        match: /ca[nñ]on city|fremont county|florence|penrose|royal gorge/i,
+      },
+      {
+        url: "https://gazette.com/feed/",
+        outlet: "The Gazette",
+        match: /ca[nñ]on city|fremont county/i,
+      },
+    ],
+    events: [
+      {
+        url: "https://www.canoncity.org/RSSFeed.aspx?ModID=58&CID=All-calendar.xml",
+        from: "Cañon City calendar",
+      },
+    ],
+    sales: [
+      {
+        url: "https://cosprings.craigslist.org/search/gms?format=rss",
+        from: "Craigslist — Colorado Springs",
+      },
+    ],
+    links: [
+      {
+        label: "Yard sales — Cañon City & the Springs",
+        href: "https://cosprings.craigslist.org/search/gms",
+        why: "Craigslist refuses servers; it opens in a browser.",
+      },
+      {
+        label: "Facebook Marketplace — Cañon City",
+        href: "https://www.facebook.com/marketplace/search/?query=yard%20sale%20canon%20city",
+        why: "Facebook only opens for a signed-in person.",
+      },
+      {
+        label: "Facebook events — Cañon City",
+        href: "https://www.facebook.com/search/events/?q=Ca%C3%B1on%20City%20Colorado",
+        why: "Facebook's events are behind the sign-in wall.",
+      },
+    ],
+  },
+];
+
+/**
+ * A city hall's own calendar, read from the feed it publishes.
+ *
+ * CivicEngage writes each event as an item with `calendarEvent:EventDates`
+ * inside it — "October 3, 2026 - October 4, 2026" — which is the day the
+ * event actually happens, not the day the item was posted. A calendar with
+ * nothing on it answers with an empty feed; that is quiet, not broken, so
+ * only a refused request throws.
+ */
+async function cityEvents(
+  url: string,
+  from: string,
+  limit: number,
+): Promise<LocalItem[]> {
+  const xml = await getText(url);
+  const items: LocalItem[] = [];
+
+  for (const block of xml.split("<item>").slice(1)) {
+    const title = cleanTitle(tag(block, "title"));
+    if (!title) continue;
+    items.push({
+      kind: "event",
+      title,
+      link: tag(block, "link"),
+      from,
+      at: monthStamp(tag(block, "calendarEvent:EventDates")),
+    });
+  }
+
+  return items
+    .sort(
+      (a, b) =>
+        (a.at ?? Number.MAX_SAFE_INTEGER) - (b.at ?? Number.MAX_SAFE_INTEGER),
+    )
+    .slice(0, limit);
+}
+
+/**
+ * The three towns, read one source at a time.
+ *
+ * Each town's news is whatever its feeds answered, newest first; a feed that
+ * refused is named rather than hidden, and a regional feed carrying nothing
+ * about the town says so instead of padding the list with another city's news.
+ * Only if not one town could be read at all does this fail, so one dead paper
+ * never takes the whole local watch down.
+ */
+async function localWatch(): Promise<LocalWatch> {
+  const towns: LocalTown[] = [];
+  const links: LiveLink[] = [];
+  const attention: string[] = [];
+
+  // The sale boards serve all three towns, so they are counted together: a
+  // board that answers at all is one working pipe for the whole watch.
+  const saleLive = new Set<string>();
+  const saleBlank: string[] = [];
+
+  for (const town of TOWNS) {
+    const read: string[] = [];
+    const refused: string[] = [];
+    const newsRows: LocalItem[] = [];
+    const saleRows: LocalItem[] = [];
+    const eventRows: LocalItem[] = [];
+    const newsLive: string[] = [];
+
+    for (const feed of town.news) {
+      // A feed known to refuse every server is still tried and still named,
+      // so the page keeps telling the truth — but it is called out for the
+      // person rather than quietly fading from the count.
+      if (feed.blocked) {
+        attention.push(
+          `${feed.outlet} — ${feed.blocked}. The developer needs to find an alternative pipeline for ${town.name}'s news.`,
+        );
+      }
+      try {
+        // A regional feed is asked for more rows than a town's own paper, so
+        // the town has a chance of appearing in it at all.
+        const rows = await news(feed.url, feed.outlet, feed.match ? 25 : 8);
+        const kept = feed.match
+          ? rows.filter((row) => feed.match?.test(`${row.title} ${row.link}`))
+          : rows;
+        if (!kept.length) {
+          refused.push(`${feed.outlet} (nothing about ${town.name})`);
+          continue;
+        }
+        read.push(feed.outlet);
+        newsLive.push(feed.outlet);
+        for (const row of kept) {
+          newsRows.push({
+            kind: "news",
+            title: row.title,
+            link: row.link,
+            from: feed.outlet,
+            at: row.at,
+          });
+        }
+      } catch {
+        refused.push(feed.outlet);
+      }
+    }
+
+    // News is the one pipeline that has to hold: two independent sources per
+    // town, so a single feed failing never leaves a blank morning.
+    if (newsLive.length < 2) {
+      attention.push(
+        `Morning news — ${town.name}: ${
+          newsLive.length ? `only one source (${newsLive[0]})` : "no source"
+        } answered at the last check. The developer needs to find an alternative news pipeline for ${town.name}.`,
+      );
+    }
+
+    for (const feed of town.events) {
+      try {
+        const rows = await cityEvents(feed.url, feed.from, 6);
+        eventRows.push(...rows);
+        read.push(feed.from);
+      } catch {
+        refused.push(feed.from);
+      }
+    }
+
+    for (const feed of town.sales) {
+      try {
+        // These feeds are sale categories already — a garage-and-moving-sale
+        // board and a paper's own garage-sale classifieds — so nothing in them
+        // is filtered, and nothing is dropped for not repeating the word.
+        const rows = await news(feed.url, feed.from, 12);
+        read.push(feed.from);
+        saleLive.add(feed.from);
+        for (const row of rows) {
+          saleRows.push({
+            kind: "sale",
+            title: row.title,
+            link: row.link,
+            from: feed.from,
+            at: row.at,
+          });
+        }
+      } catch {
+        refused.push(feed.from);
+      }
+    }
+    if (!saleRows.length) saleBlank.push(town.name);
+
+    newsRows.sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
+    towns.push({
+      name: town.name,
+      home: town.home,
+      read,
+      refused,
+      news: newsRows.slice(0, 6),
+      sales: saleRows.slice(0, 6),
+      events: eventRows.slice(0, 6),
+    });
+    links.push(...town.links);
+  }
+
+  // The yard sales are the thin one. Craigslist refuses every server, so the
+  // only board that answers is the Post Independent's own — one pipe where
+  // there should be two. It is the developer's job to find the others, and it
+  // is said here so the person is told rather than left guessing.
+  const saleNames = [...saleLive];
+  if (saleNames.length < 2) {
+    attention.push(
+      `Yard sales & classifieds: only ${saleNames.length} board${
+        saleNames.length === 1 ? "" : "s"
+      } answer this server${
+        saleNames.length ? ` (${saleNames.join(", ")})` : ""
+      }. Craigslist refuses every server, leaving ${
+        saleBlank.length ? saleBlank.join(" and ") : "the towns"
+      } with no live sale feed. This needs the developer's attention — the developer needs to find alternative pipelines for the yard-sale and classified listings.`,
+    );
+  }
+
+  if (
+    !towns.some(
+      (town) => town.news.length || town.sales.length || town.events.length,
+    )
+  ) {
+    throw new Error("Not one of the hometown feeds answered.");
+  }
+
+  return { at: Date.now(), towns, links, attention };
+}
+
+/**
+ * The morning rundown: the 5am check, written as lines a person can read or
+ * the assistant can say — each town's newest headlines, then what is for
+ * sale, then what is happening. It fetches nothing new; it is the local
+ * watch, in the order a person would say it.
+ */
+function makeRundown(local: LocalWatch): Rundown {
+  const lines: RundownLine[] = [];
+
+  for (const town of local.towns) {
+    for (const item of town.news.slice(0, 3)) {
+      lines.push({
+        place: town.name,
+        kind: item.kind,
+        text: item.title,
+        href: item.link || null,
+        at: item.at,
+      });
+    }
+    for (const item of town.sales.slice(0, 2)) {
+      lines.push({
+        place: town.name,
+        kind: item.kind,
+        text: `For sale: ${item.title}`,
+        href: item.link || null,
+        at: item.at,
+      });
+    }
+    for (const item of town.events.slice(0, 3)) {
+      lines.push({
+        place: town.name,
+        kind: item.kind,
+        text: item.title,
+        href: item.link || null,
+        at: item.at,
+      });
+    }
+    if (!town.news.length && !town.sales.length && !town.events.length) {
+      lines.push({
+        place: town.name,
+        kind: "news",
+        text: "Nothing came back from its feeds.",
+        href: null,
+        at: null,
+      });
+    }
+  }
+
+  return { at: local.at, lines };
+}
+
 /* --------------------------------------------------------------- assembling */
 
 export async function gather(): Promise<Briefing> {
@@ -1711,6 +2228,13 @@ export async function gather(): Promise<Briefing> {
     news("https://feeds.bbci.co.uk/news/world/rss.xml", "BBC", 6),
   );
 
+  // The three hometowns, read the same way — one source at a time, so no two
+  // newsrooms get hammered at once for the same morning's watch.
+  const localNow = await source(localWatch);
+  const rundownNow: Source<Rundown> = localNow.ok
+    ? { ok: true, at: localNow.at, data: makeRundown(localNow.data) }
+    : { ok: false, at: localNow.at, error: localNow.error };
+
   // The ranch and farm board, read from the operations that publish it.
   const hayNow = await source(hayPrices);
   const horseAuctionsNow = await source(horseAuctions);
@@ -1742,6 +2266,8 @@ export async function gather(): Promise<Briefing> {
     avalanche: avalancheNow,
     wildfire: wildfireNow,
     world: worldNow,
+    local: localNow,
+    rundown: rundownNow,
     hay: hayNow,
     horseAuctions: horseAuctionsNow,
     equipmentAuctions: equipmentAuctionsNow,
@@ -1763,6 +2289,7 @@ export async function gather(): Promise<Briefing> {
 
 const SECTION_ORDER = [
   "summary",
+  "rundown",
   "weather",
   "snow",
   "alerts",
@@ -1776,6 +2303,7 @@ const SECTION_ORDER = [
   "hay",
   "auctions",
   "news",
+  "local",
   "sky",
   "airspace",
   "links",
@@ -1783,6 +2311,7 @@ const SECTION_ORDER = [
 
 const SECTION_TITLES: Record<string, string> = {
   summary: "Right now",
+  rundown: "The morning rundown — Grand Junction, Rifle and Cañon City",
   weather: "Weather",
   snow: "Mountain snow",
   alerts: "Watches and warnings",
@@ -1796,6 +2325,7 @@ const SECTION_TITLES: Record<string, string> = {
   hay: "Hay and alfalfa prices",
   auctions: "Livestock, horse and equipment auctions",
   news: "Headlines",
+  local: "Local watch — the hometown papers, sales and events",
   sky: "Space, satellites and the ground",
   airspace: "Aircraft overhead",
   links: "Every link on the board",
@@ -1847,6 +2377,21 @@ function sayWhen(ms: number | null): string {
     hour: "numeric",
     minute: "2-digit",
     timeZone: "America/Denver",
+  });
+}
+
+/**
+ * A day, written the way a calendar writes one. Event dates are stored as
+ * midnight UTC of the calendar date, so they are read back in UTC —
+ * formatting them in Colorado time would slide every event a day back.
+ */
+function sayDate(at: number | null): string {
+  if (at === null) return "day unknown";
+  return new Date(at).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
   });
 }
 
@@ -1924,10 +2469,43 @@ function boardBlocks(data: Briefing): { id: string; lines: string[] }[] {
         );
       }
     }
+    if (data.local?.ok) {
+      const found = data.local.data.towns.reduce(
+        (total, town) =>
+          total + town.news.length + town.sales.length + town.events.length,
+        0,
+      );
+      if (found) {
+        bits.push(
+          `${found} local item${found === 1 ? "" : "s"} across Grand Junction, Rifle and Cañon City`,
+        );
+      }
+    }
     blocks.push({
       id: "summary",
       lines: bits.length ? [`${bits.join("; ")}.`] : ["No readings came back."],
     });
+  }
+
+  /* rundown */
+  {
+    const lines: string[] = [];
+    if (data.rundown?.ok && data.rundown.data.lines.length) {
+      for (const line of data.rundown.data.lines) {
+        const when =
+          line.at === null
+            ? ""
+            : line.kind === "event"
+              ? ` (${sayDate(line.at)})`
+              : ` (${sayWhen(line.at)})`;
+        lines.push(
+          `${line.place}: ${line.text}${when}${line.href ? ` — ${line.href}` : ""}`,
+        );
+      }
+    } else {
+      lines.push("The local rundown could not be read just now.");
+    }
+    blocks.push({ id: "rundown", lines });
   }
 
   /* weather */
@@ -2191,6 +2769,62 @@ function boardBlocks(data: Briefing): { id: string; lines: string[] }[] {
     blocks.push({ id: "news", lines });
   }
 
+  /* local */
+  {
+    const lines: string[] = [];
+    if (data.local?.ok) {
+      for (const town of data.local.data.towns) {
+        const quiet =
+          !town.news.length && !town.sales.length && !town.events.length;
+        lines.push(
+          `${town.name} —${
+            town.read.length
+              ? ` read from ${town.read.join(", ")}`
+              : " nothing answered"
+          }.`,
+        );
+        for (const item of town.news) {
+          lines.push(
+            `  News: ${item.title} — ${item.from}${
+              item.at !== null ? `, ${sayWhen(item.at)}` : ""
+            }${item.link ? ` — ${item.link}` : ""}`,
+          );
+        }
+        for (const item of town.sales) {
+          lines.push(
+            `  For sale: ${item.title} — ${item.from}${item.link ? ` — ${item.link}` : ""}`,
+          );
+        }
+        for (const item of town.events) {
+          lines.push(
+            `  Happening: ${item.title}${
+              item.at !== null ? `, ${sayDate(item.at)}` : ""
+            } — ${item.from}${item.link ? ` — ${item.link}` : ""}`,
+          );
+        }
+        if (quiet) lines.push("  Nothing came back for it just now.");
+        if (town.refused.length) {
+          lines.push(`  Would not answer: ${town.refused.join(", ")}.`);
+        }
+      }
+      if (data.local.data.attention?.length) {
+        lines.push(
+          "Pipelines that need attention — say these plainly, they are not readings:",
+        );
+        for (const note of data.local.data.attention) lines.push(`  ${note}`);
+      }
+      if (data.local.data.links.length) {
+        lines.push("Facebook and the sale boards, one click in:");
+        for (const link of data.local.data.links) {
+          lines.push(`  ${link.label} — ${link.href} (${link.why})`);
+        }
+      }
+    } else {
+      lines.push("The hometown feeds could not be read just now.");
+    }
+    blocks.push({ id: "local", lines });
+  }
+
   /* sky */
   {
     const lines: string[] = [];
@@ -2321,8 +2955,12 @@ export function briefingDigest(
  */
 const BOARD_ZONE = "America/Denver";
 
-/** The two hours, on Colorado's clock, at which the board is rebuilt. */
-const REBUILD_HOURS = [5, 14];
+/**
+ * The hours, on Colorado's clock, at which the board is rebuilt: 5am for the
+ * full check the family asked for — including the hometown feeds — 8am to
+ * write the morning rundown over that check, and 2pm for the afternoon.
+ */
+const REBUILD_HOURS = [5, 8, 14];
 
 /** What hour it is in Colorado right now, on a 24-hour clock. */
 function coloradoHour(now = Date.now()) {
@@ -2353,7 +2991,7 @@ function stamp(at: number | string): string {
 }
 
 /**
- * The hourly look at the clock: is this one of the two hours?
+ * The hourly look at the clock: is this one of the three hours?
  *
  * Kept apart from `run` on purpose. `run` rebuilds the board and is what the
  * Refresh button calls, so it must never refuse to work; deciding *when* the
@@ -2379,12 +3017,17 @@ export const run = internalAction({
       source: "board",
       label: "Refreshing the [LIVE] board",
       detail:
-        "Going out to every feed the board draws on — the weather and the mountain snow, the watches and warnings, the air and the water, drought and rivers, wildfire, the markets, hay and auctions, the aircraft overhead, and the headlines.",
+        "Going out to every feed the board draws on — the weather and the mountain snow, the watches and warnings, the air and the water, drought and rivers, wildfire, the markets, hay and auctions, the aircraft overhead, the headlines, and the hometown feeds and calendars for Grand Junction, Rifle and Cañon City.",
     });
 
     try {
       const briefing = await gather();
       await ctx.runMutation(internal.briefing.store, { data: briefing });
+      // The board is a wall somebody has to walk up to; the calendar is where
+      // the day actually lives. Every rebuild now puts what the board found
+      // straight onto the calendar's Assistant & LIVE layer, so a Refresh is
+      // reflected there at once rather than waiting for the 06:15 pass.
+      await ctx.runMutation(internal.calendar.syncBoard, {});
       await ctx.runMutation(internal.ai_behind.close, {
         id: started,
         status: "done",

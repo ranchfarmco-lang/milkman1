@@ -1,3 +1,4 @@
+import { CallWindows } from "@/components/CallWindows";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -10,18 +11,17 @@ import { api } from "@/convex/_generated/api";
 import type { FamilyMember } from "@/convex/family";
 import { useCall } from "@/hooks/use-call";
 import { notifyCall, ringtone } from "@/lib/alerts";
+import {
+  callPanel,
+  callSurface,
+  notYetOn,
+  onCall,
+  ringLine,
+  type CallSurface,
+} from "@/lib/call-surfaces";
 import { cn } from "@/lib/utils";
 import { useQuery } from "convex/react";
-import {
-  Camera,
-  Loader2,
-  Mic,
-  MicOff,
-  Phone,
-  PhoneOff,
-  RotateCw,
-  Video,
-} from "lucide-react";
+import { Bell, Camera, Loader2, Phone, PhoneOff, Video } from "lucide-react";
 import {
   createContext,
   useCallback,
@@ -32,6 +32,7 @@ import {
   type ReactNode,
 } from "react";
 import { useLocation } from "react-router";
+import { toast } from "sonner";
 
 /**
  * Calling: our own video boxes, drawn by our own code.
@@ -41,6 +42,29 @@ import { useLocation } from "react-router";
  * widget. The media itself is encrypted end to end, either straight between the
  * devices or through a media server that every device connects out to (see
  * `use-call.ts`), which is what makes it work from behind a strict router.
+ *
+ * This provider is deliberately the *shell's*, not a page's, and the live call
+ * is held here for one reason above all: leaving the Messenger must not drop a
+ * call. The media, the shared screens and the call itself stay put while pages
+ * come and go underneath them — a call ends when somebody hangs up, and at no
+ * other time.
+ *
+ * Three separate things are drawn, and keeping them apart is what makes the
+ * page usable during a call:
+ *
+ *   1. **the portals**, on the Messenger itself, when a video call is on and
+ *      nobody has taken it out of the page;
+ *   2. **the movable call box**, everywhere else (`CallWindows.tsx`) — it
+ *      follows you across the hub and can be dragged out of the way;
+ *   3. **the panel**, a dialog that is only ever a ring to answer or the list of
+ *      who to call. It closes without touching a call that is already up.
+ *
+ * The list of who to call is also how the others are **rung into a call that is
+ * already going on**. Ringing from scratch opens a new call and ends whatever
+ * you were in; that is the wrong thing mid-conversation, so with a call up the
+ * same list rings people into it instead — see `calls.invite`. Either way the
+ * person at the other end is rung the same way: a panel they answer, a ringtone
+ * and a notification, so a call is never something they find out about later.
  */
 
 /* ------------------------------------------------------------- microphone */
@@ -101,6 +125,18 @@ type CallApi = {
   ringEveryone: (kind: CallKind) => void;
   /** Get on the standing video room and wait for the rest to turn up. */
   joinRoom: () => void;
+  /** Where the live call is drawn: the page's portals, a movable box, nowhere. */
+  surface: CallSurface;
+  /** Take the call out of the page, into its own movable box. */
+  popOut: () => void;
+  /** Put it back among the Messenger's own portals. */
+  dock: () => void;
+  /** True while the page in front of you could hold the call itself. */
+  canDock: boolean;
+  /** Whose shared screen is open in its portal, if any. */
+  screenOpen: string | null;
+  openScreen: (userId: string) => void;
+  closeScreen: () => void;
 };
 
 const CallContext = createContext<CallApi>({
@@ -108,6 +144,13 @@ const CallContext = createContext<CallApi>({
   ringOne: () => undefined,
   ringEveryone: () => undefined,
   joinRoom: () => undefined,
+  surface: "none",
+  popOut: () => undefined,
+  dock: () => undefined,
+  canDock: false,
+  screenOpen: null,
+  openScreen: () => undefined,
+  closeScreen: () => undefined,
 });
 
 /**
@@ -136,18 +179,42 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const call = useCall();
   const location = useLocation();
   const [picker, setPicker] = useState<CallKind | null>(null);
+  /**
+   * True once the call has been asked out of the Messenger's portals. Kept here
+   * rather than on the page, because the page comes and goes and the call does
+   * not: walking off the Messenger must not put the picture back in it.
+   */
+  const [poppedOut, setPoppedOut] = useState(false);
+  /**
+   * Which shared screen the portal is showing, and the set of screens it was
+   * chosen among. A choice only holds while those screens are the same: the
+   * moment somebody else puts a screen on, theirs opens — being seen is the
+   * whole point of turning one on — while a chosen one is never interrupted.
+   */
+  const [screenPick, setScreenPick] = useState<{
+    key: string;
+    id: string | null;
+  }>({ key: "", id: null });
 
   const openPicker = useCallback((kind: CallKind) => setPicker(kind), []);
+  const popOut = useCallback(() => setPoppedOut(true), []);
+  const dock = useCallback(() => setPoppedOut(false), []);
 
   const others = members.filter((member) => !member.isMe);
   const onlineOthers = others.filter((member) => member.online).length;
 
+  // Ringing out says so, by name, the moment it goes: a ring that vanishes into
+  // nothing is the one thing a caller cannot tell from a broken hub.
   const ringOne = useCallback(
     (kind: CallKind, userId: string) => {
       setPicker(null);
-      void call.ring(kind, [userId]);
+      const who = others.find((member) => member._id === userId)?.name ?? null;
+      void call
+        .ring(kind, [userId])
+        .then(() => toast.success(ringLine([who]) ?? "Ringing them…"))
+        .catch(() => toast.error("The ring could not be sent."));
     },
-    [call],
+    [call, others],
   );
 
   // Ring the whole family at once — but only the people who are here. Ringing
@@ -156,10 +223,19 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const ringEveryone = useCallback(
     (kind: CallKind) => {
       setPicker(null);
-      void call.ring(
-        kind,
-        others.filter((member) => member.online).map((member) => member._id),
-      );
+      const here = others.filter((member) => member.online);
+      void call
+        .ring(
+          kind,
+          here.map((member) => member._id),
+        )
+        .then(() =>
+          toast.success(
+            ringLine(here.map((member) => member.name)) ??
+              "Nobody is around to ring.",
+          ),
+        )
+        .catch(() => toast.error("The ring could not be sent."));
     },
     [call, others],
   );
@@ -187,52 +263,128 @@ export function CallProvider({ children }: { children: ReactNode }) {
     return ringtone();
   }, [incoming, callerName, conference, call.kind]);
 
-  // The messenger draws the four-portal stage itself, alongside the transcript.
-  // There, the call lives entirely inside the portals — every button is there —
-  // and the pop-up panel steps out of the way instead of opening a second,
-  // smaller view on top of it.
-  const stagePage = location.pathname === "/messenger";
+  // Where the call is drawn, and what the panel is for. Both are pure decisions
+  // (`src/lib/call-surfaces.ts`) rather than conditions worked out here: a video
+  // call on the Messenger lives in the page's own portals, everything else in
+  // the movable box, and on the Messenger a video ring is answered in the room.
+  const onMessenger = location.pathname === "/messenger";
+  const joined = call.current?.myState === "joined";
+  /** The call's own people: on it, or being rung. */
+  const people = call.current?.people ?? [];
+  /** With a call up, the picker rings people into it instead of starting one. */
+  const ringingInto = inCall && joined;
+  const surface = callSurface({
+    inCall,
+    kind: call.kind,
+    onMessenger,
+    poppedOut,
+  });
+  const ringInRoom = incoming && call.kind === "video" && onMessenger;
+  const panel = callPanel({ incoming, picker: picker !== null, ringInRoom });
+  /** The page in front of you could hold a video call itself, put back. */
+  const canDock = onMessenger && call.kind === "video" && joined;
 
-  const stageOwnsCall =
-    inCall &&
-    call.kind === "video" &&
-    call.current?.myState === "joined" &&
-    !incoming &&
-    stagePage;
-  const pageAnswersRing = incoming && call.kind === "video" && stagePage;
+  /**
+   * Which shared screen the portal shows: the one that was chosen, the first
+   * one on when nothing was, or none. A screen that starts while a choice is
+   * standing opens its own portal, because being seen is the point of it.
+   */
+  const sharers = Object.keys(call.screens);
+  const sharerKey = sharers.join(",");
+  const screenOpen =
+    sharers.length === 0
+      ? null
+      : screenPick.key === sharerKey
+        ? screenPick.id
+        : sharers[0];
 
-  const open = picker !== null || (inCall && !stageOwnsCall && !pageAnswersRing);
+  /**
+   * Ring people into the call that is already up. Somebody already on the call,
+   * or already being rung, is kept on the list but out of reach, so no button
+   * quietly does nothing — and what actually went out is said out loud, by name.
+   */
+  const ringInto = (ids: string[]) => {
+    setPicker(null);
+    const fresh = notYetOn(people, ids);
+    if (fresh.length === 0) {
+      toast("Everyone asked for is already on the call.");
+      return;
+    }
 
-  // Closing the panel while it matters means hanging up, so nothing is left
-  // ringing in the background with no way back to it. The one exception is the
-  // portals taking the call over — that is not a hang-up.
+    const names = fresh.map(
+      (id) => others.find((member) => member._id === id)?.name ?? null,
+    );
+    void call
+      .invite(fresh)
+      .then((invited) => {
+        if (invited > 0) {
+          toast.success(ringLine(names) ?? "Ringing them…");
+          return;
+        }
+        toast.error("Nobody could be rung — a call holds four people at once.");
+      })
+      .catch(() => toast.error("The ring could not be sent."));
+  };
+
+  const openScreen = useCallback(
+    (userId: string) => setScreenPick({ key: sharerKey, id: userId }),
+    [sharerKey],
+  );
+  const closeScreen = useCallback(
+    () => setScreenPick({ key: sharerKey, id: null }),
+    [sharerKey],
+  );
+
+  // Closing the panel means the picker was dismissed, or a ring was turned
+  // down. It never means hanging up: the box, the portals and the hang-up button
+  // are the only things that end a call.
   const close = () => {
     setPicker(null);
-    if (stageOwnsCall || pageAnswersRing) return;
     if (incoming) call.decline();
-    else if (inCall) call.hangUp();
   };
 
   return (
     <CallContext.Provider
-      value={{ openPicker, ringOne, ringEveryone, joinRoom }}
+      value={{
+        openPicker,
+        ringOne,
+        ringEveryone,
+        joinRoom,
+        surface,
+        popOut,
+        dock,
+        canDock,
+        screenOpen,
+        openScreen,
+        closeScreen,
+      }}
     >
       <CallStageContext.Provider value={call}>
         {children}
 
-        <Dialog open={open} onOpenChange={(next) => (next ? undefined : close())}>
+        {/* The call itself, when the page in front of you is not the one it
+            belongs on. Drawn at the shell, so walking to another tab leaves it
+            running — the picture, the sound and any shared screen come along. */}
+        <CallWindows />
+
+        {/* A ring to answer, or the list of who to call. Never the live call:
+            that is the portals or the box, and closing this drops nothing. */}
+        <Dialog
+          open={panel !== "none"}
+          onOpenChange={(next) => (next ? undefined : close())}
+        >
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle className="text-[13px]">
-                {title(call, picker)}
+                {title(call, picker, ringingInto)}
               </DialogTitle>
               <DialogDescription className="text-[11px] leading-4">
-                {subtitle(call, picker)}
+                {subtitle(call, picker, ringingInto)}
               </DialogDescription>
             </DialogHeader>
 
-            {inCall ? (
-              <ActiveCall call={call} />
+            {panel === "incoming" ? (
+              <IncomingCall call={call} />
             ) : (
               <>
                 <ul className="flex flex-col gap-1">
@@ -245,27 +397,61 @@ export function CallProvider({ children }: { children: ReactNode }) {
                     <>
                       <li>
                         <PickerRow
-                          name="Everyone"
-                          detail={`${others.length} in the family · ${onlineOthers} online`}
-                          icon={<Video className="size-3.5" />}
+                          name={ringingInto ? "Everyone else" : "Everyone"}
+                          detail={
+                            ringingInto
+                              ? `${notYetOn(people, others.map((one) => one._id)).length} not on the call yet`
+                              : `${others.length} in the family · ${onlineOthers} online`
+                          }
+                          icon={
+                            ringingInto ? (
+                              <Bell className="size-3.5" />
+                            ) : (
+                              <Video className="size-3.5" />
+                            )
+                          }
                           onClick={() =>
-                            picker === "video"
-                              ? joinRoom()
-                              : ringEveryone("audio")
+                            ringingInto
+                              ? ringInto(others.map((one) => one._id))
+                              : ringEveryone(picker ?? "audio")
                           }
                         />
                       </li>
-                      {others.map((member) => (
-                        <li key={member._id}>
-                          <PickerRow
-                            name={member.name}
-                            detail={member.online ? "Online" : "Offline"}
-                            dim={!member.online}
-                            icon={<Phone className="size-3.5" />}
-                            onClick={() => picker && ringOne(picker, member._id)}
-                          />
-                        </li>
-                      ))}
+                      {others.map((member) => {
+                        const where = ringingInto
+                          ? onCall(people, member._id)
+                          : "none";
+                        return (
+                          <li key={member._id}>
+                            <PickerRow
+                              name={member.name}
+                              detail={
+                                where === "joined"
+                                  ? "On the call"
+                                  : where === "ringing"
+                                    ? "Ringing…"
+                                    : member.online
+                                      ? "Online"
+                                      : "Offline"
+                              }
+                              dim={where !== "none" || !member.online}
+                              disabled={where !== "none"}
+                              icon={
+                                ringingInto ? (
+                                  <Bell className="size-3.5" />
+                                ) : (
+                                  <Phone className="size-3.5" />
+                                )
+                              }
+                              onClick={() =>
+                                ringingInto
+                                  ? ringInto([member._id])
+                                  : picker && ringOne(picker, member._id)
+                              }
+                            />
+                          </li>
+                        );
+                      })}
                     </>
                   )}
                 </ul>
@@ -284,36 +470,31 @@ export function CallProvider({ children }: { children: ReactNode }) {
 function title(
   call: ReturnType<typeof useCall>,
   picker: CallKind | null,
+  ringingInto: boolean,
 ) {
   if (call.current?.incoming) {
     const many = (call.current.people.length ?? 0) > 2;
     return `Incoming ${many ? "conference " : ""}${call.kind} call`;
   }
-  if (call.current) {
-    return `${call.kind === "video" ? "Video" : "Voice"} call · ${
-      call.current.joined
-    } in`;
-  }
+  if (ringingInto) return "Ring someone into this call";
   return picker === "video" ? "Start a video call" : "Start a voice call";
 }
 
 function subtitle(
   call: ReturnType<typeof useCall>,
   picker: CallKind | null,
+  ringingInto: boolean,
 ) {
   if (call.current?.incoming) {
     return `${call.current.startedByName} is calling. A call happens alongside the room — everyone stays in the one thread.`;
   }
-  if (call.current) {
-    return call.state === "connected"
-      ? "Connected — encrypted end to end."
-      : call.state === "failed"
-        ? "The direct connection could not be made."
-        : "Ringing…";
+  if (ringingInto) {
+    return "They are rung and notified straight away, and answering puts them into the call that is already going on. Nobody already on it is dropped.";
   }
-  return picker === "video"
-    ? "Pick who to call. Everyone is still in the same message room."
-    : "Pick who to call. Everyone is still in the same message room.";
+  // The picker says the same thing for both kinds: what is being chosen is who
+  // to call, and where the call will be drawn is not their decision.
+  void picker;
+  return "Pick who to call. Everyone is still in the same message room, and the call stays with you wherever you go.";
 }
 
 function PickerRow({
@@ -321,19 +502,25 @@ function PickerRow({
   detail,
   icon,
   dim = false,
+  disabled = false,
   onClick,
 }: {
   name: string;
   detail: string;
   icon: ReactNode;
   dim?: boolean;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={onClick}
-      className="flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left transition-colors hover:bg-accent/40"
+      className={cn(
+        "flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left transition-colors",
+        disabled ? "cursor-default opacity-70" : "hover:bg-accent/40",
+      )}
     >
       <span
         className={cn(
@@ -484,83 +671,20 @@ function MediaCheck() {
   );
 }
 
-function ActiveCall({ call }: { call: ReturnType<typeof useCall> }) {
-  const level = useLevel(call.localStream, call.muted);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const tiles = Object.entries(call.remoteStreams);
-
-  // The local preview, so you can see what you are sending.
-  useEffect(() => {
-    if (videoRef.current && call.localStream) {
-      videoRef.current.srcObject = call.localStream;
-    }
-  }, [call.localStream]);
-
-  if (call.current?.incoming) {
-    return (
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-3 rounded-xl border border-border/60 bg-background/40 px-3 py-2.5">
-          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-white/10 text-white">
-            {call.kind === "video" ? (
-              <Video className="size-4" />
-            ) : (
-              <Phone className="size-4" />
-            )}
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[12px] font-medium">
-              {call.current.startedByName}
-            </p>
-            <p className="truncate text-[10px] text-muted-foreground">
-              {(call.current.people.length ?? 0) > 2
-                ? "Conference call"
-                : call.kind === "video"
-                  ? "Video call"
-                  : "Voice call"}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            onClick={call.answer}
-            className="h-9 flex-1 rounded-xl bg-white text-[11px] text-black hover:bg-white/85"
-          >
-            <Phone className="size-3.5" />
-            Answer
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={call.decline}
-            className="h-9 flex-1 rounded-xl text-[11px]"
-          >
-            <PhoneOff className="size-3.5" />
-            Decline
-          </Button>
-        </div>
-      </div>
-    );
-  }
+/**
+ * A call ringing at you: who it is, and the two answers.
+ *
+ * The only live-call-shaped thing left in the panel, deliberately. Everything
+ * that happens after this — the faces, the mute buttons, the shared screens —
+ * belongs to the call itself, which lives in the portals or in the box and keeps
+ * living when this dialog is long gone.
+ */
+function IncomingCall({ call }: { call: ReturnType<typeof useCall> }) {
+  const ringing = call.current;
+  if (!ringing) return null;
 
   return (
     <div className="flex flex-col gap-3">
-      {call.kind === "video" ? (
-        <div className="grid grid-cols-2 gap-1.5">
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="aspect-video w-full rounded-xl border border-border/60 bg-black object-cover"
-          />
-          {tiles.map(([id, stream]) => (
-            <RemoteVideo key={id} stream={stream} />
-          ))}
-        </div>
-      ) : null}
-
       <div className="flex items-center gap-3 rounded-xl border border-border/60 bg-background/40 px-3 py-2.5">
         <span className="grid size-9 shrink-0 place-items-center rounded-full bg-white/10 text-white">
           {call.kind === "video" ? (
@@ -571,118 +695,37 @@ function ActiveCall({ call }: { call: ReturnType<typeof useCall> }) {
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-[12px] font-medium">
-            {call.current?.people
-              .filter((one) => !one.isMe)
-              .map((one) => one.name)
-              .join(", ") || "Waiting for them to pick up"}
+            {ringing.startedByName}
           </p>
           <p className="truncate text-[10px] text-muted-foreground">
-            {call.problem
-              ? call.problem
-              : call.failure
-                ? call.failure
-                : call.state === "connecting"
-                  ? "Connecting…"
-                  : call.muted
-                    ? "Your microphone is muted"
-                    : "Your microphone is live"}
+            {ringing.people.length > 2
+              ? "Conference call"
+              : call.kind === "video"
+                ? "Video call"
+                : "Voice call"}
           </p>
         </div>
-        {call.state === "connecting" ? (
-          <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-        ) : null}
-      </div>
-
-      {/* Both the device and the network are recoverable: offer the retry. */}
-      {call.problem ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={call.retryMedia}
-          className="h-8 gap-1.5 rounded-xl text-[11px]"
-        >
-          <RotateCw className="size-3.5" />
-          Try the camera again
-        </Button>
-      ) : call.failure ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={call.retryConnection}
-          className="h-8 gap-1.5 rounded-xl text-[11px]"
-        >
-          <RotateCw className="size-3.5" />
-          Retry the connection
-        </Button>
-      ) : null}
-
-      {/* Live microphone level — flat while muted, moving while live. */}
-      <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
-        <div
-          className="h-full rounded-full bg-white transition-[width] duration-75"
-          style={{ width: `${Math.min(100, Math.round(level * 140))}%` }}
-        />
       </div>
 
       <div className="flex items-center gap-2">
         <Button
           type="button"
-          variant={call.muted ? "default" : "outline"}
-          size="sm"
-          aria-pressed={call.muted}
-          onClick={() => call.setMuted(!call.muted)}
-          className="h-9 flex-1 gap-1.5 rounded-xl text-[11px]"
+          onClick={call.answer}
+          className="h-9 flex-1 rounded-xl bg-white text-[11px] text-black hover:bg-white/85"
         >
-          {call.muted ? (
-            <MicOff className="size-3.5" />
-          ) : (
-            <Mic className="size-3.5" />
-          )}
-          {call.muted ? "Unmute" : "Mute"}
+          <Phone className="size-3.5" />
+          Answer
         </Button>
-
         <Button
           type="button"
-          variant={call.speaker ? "default" : "outline"}
-          size="sm"
-          aria-pressed={call.speaker}
-          title="Hear the other end"
-          onClick={() => call.setSpeaker(!call.speaker)}
-          className="h-9 flex-1 gap-1.5 rounded-xl text-[11px]"
-        >
-          {call.speaker ? "Speaker" : "Muted"}
-        </Button>
-
-        <Button
-          type="button"
-          size="sm"
-          onClick={call.hangUp}
-          className="h-9 flex-1 gap-1.5 rounded-xl bg-white text-[11px] text-black hover:bg-white/85"
+          variant="outline"
+          onClick={call.decline}
+          className="h-9 flex-1 rounded-xl text-[11px]"
         >
           <PhoneOff className="size-3.5" />
-          End
+          Decline
         </Button>
       </div>
     </div>
-  );
-}
-
-function RemoteVideo({ stream }: { stream: MediaStream }) {
-  const ref = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    if (ref.current) ref.current.srcObject = stream;
-  }, [stream]);
-
-  return (
-    <video
-      ref={ref}
-      autoPlay
-      playsInline
-      muted
-      className="aspect-video w-full rounded-xl border border-border/60 bg-black object-cover"
-    />
   );
 }

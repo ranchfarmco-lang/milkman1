@@ -4,10 +4,12 @@ import {
   backupZip,
   dataAsJson,
   linuxKit,
+  readShippedSource,
+  readSource,
   sourceAsText,
   stampOf,
   type HubBackup,
-  type SourceMap,
+  type SourceResult,
 } from "@/lib/backup";
 import { downloadBlob, downloadText, readableSize } from "@/lib/download";
 import { useConvex } from "convex/react";
@@ -39,22 +41,34 @@ import { toast } from "sonner";
  * It also has to work when the hub's database does not. This page can be opened
  * without signing in (see `PublicShell`), so it asks the live database for the
  * newest copy — the app *with* the AI Builder's changes merged in — and, if the
- * database will not answer, falls back to the copy of the app bundled into this
- * very page (`src/convex/self_source.ts`). The data export is the one thing that
+ * database will not answer, falls back to the copy of the app shipped beside
+ * this page (`public/self-source.json`). The data export is the one thing that
  * genuinely needs the database, and it says so rather than pretending.
+ *
+ * The live copy arrives a page at a time through `api.backup.sourcePage` — the
+ * snapshot is about four megabytes, and one four-megabyte answer is a frame the
+ * browser has to hold whole and Convex re-sends whenever the Builder writes a
+ * file. See `readSource` in `src/lib/backup.ts`.
  */
 type Job = "everything" | "program" | "text" | "data" | "steps" | null;
 
-type SourceResult = { at: string; files: SourceMap; patched?: string[] };
-type Manifest = { files: number; bytes: number; at: string; changed?: number };
+type Manifest = {
+  files: number;
+  bytes: number;
+  at: string;
+  /** Files the AI Builder has changed since the app's own copy was taken. */
+  changed?: number;
+  /** Working copies on the bench that are older than that copy, and go nowhere. */
+  superseded?: number;
+};
 
-/** How long to wait for the live database before using the bundled copy. */
+/** How long to wait for the live database before using the shipped copy. */
 const LIVE_TIMEOUT_MS = 4000;
 
 export function BackupPanel() {
   const convex = useConvex();
   const [manifest, setManifest] = useState<Manifest | null>(null);
-  /** null while we are still finding out; false means the bundled copy. */
+  /** null while we are still finding out; false means the shipped copy. */
   const [live, setLive] = useState<boolean | null>(null);
   const [job, setJob] = useState<Job>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -63,7 +77,7 @@ export function BackupPanel() {
   const address = (import.meta.env.VITE_CONVEX_URL as string | undefined) ?? "";
 
   // Ask the live database for its numbers once. A disabled deployment, a sign
-  // out or a slow answer all land on the bundled copy, so a download still
+  // out or a slow answer all land on the shipped copy, so a download still
   // works rather than the panel sitting dead.
   useEffect(() => {
     let alive = true;
@@ -93,18 +107,15 @@ export function BackupPanel() {
   const getSource = async (): Promise<SourceResult> => {
     if (live !== false) {
       try {
-        return (await convex.query(api.backup.source, {})) as SourceResult;
+        return await readSource(convex, (pulled, total) =>
+          setNote(`Pulled ${pulled} of ${total} files…`),
+        );
       } catch {
-        // Fall through to the copy bundled into this page.
+        // Fall through to the copy shipped beside this page.
       }
     }
 
-    const bundled = await import("@/convex/self_source");
-    return {
-      at: bundled.SELF_SNAPSHOT_AT,
-      files: bundled.SELF_SOURCE as SourceMap,
-      patched: [],
-    };
+    return readShippedSource();
   };
 
   const getData = async (): Promise<HubBackup | null> => {
@@ -209,7 +220,7 @@ export function BackupPanel() {
   }
 
   const busy = job !== null;
-  // The bundled copy is always there, so a download is possible the moment we
+  // The shipped copy is always there, so a download is possible the moment we
   // know the live database is not — and only once it has answered when it is.
   const ready = live === false || Boolean(manifest);
 
@@ -225,7 +236,7 @@ export function BackupPanel() {
       id: "everything",
       icon: Archive,
       title: "Everything — the app and its data",
-      body: "One zip holding the whole app, any fix the AI Builder has made to it, a Dockerfile that runs it on your own computer, and a JSON copy of everything the hub has written down. This is the one to keep.",
+      body: "One zip holding the current app — every page and function as it stands, with any AI Builder change newer than it carried on top — a Dockerfile that runs it on your own computer, and a JSON copy of everything the hub has written down. This is the one to keep.",
       action: "Save .zip",
       primary: true,
     },
@@ -233,7 +244,7 @@ export function BackupPanel() {
       id: "program",
       icon: Container,
       title: "The app, ready to run",
-      body: "The same zip without the data: the code, the generated Convex types, and the Docker files. On a Linux laptop, unzip it and run docker compose up --build.",
+      body: "The same zip without the data: the current app's code, the generated Convex types, and the Docker files. On a Linux laptop, unzip it and run docker compose up --build.",
       action: "Save .zip",
     },
     {
@@ -270,31 +281,44 @@ export function BackupPanel() {
       {live === false ? (
         <p className="mt-2 text-[9px] leading-4 text-muted-foreground">
           The live hub database is not answering, so the code downloads below are
-          built from the copy of the app that ships inside this page. They still
+          built from the copy of the app shipped beside this page. They still
           work — only the data copy needs the database.
         </p>
       ) : manifest ? (
         <p className="mt-2 text-[9px] leading-4 text-muted-foreground">
-          Ready:{" "}
+          This is the app as it stands:{" "}
           <span className="text-foreground">
             {manifest.files} files, {readableSize(manifest.bytes)}
-          </span>{" "}
-          of code, snapshotted{" "}
+          </span>
+          , its own copy taken{" "}
           {new Date(manifest.at).toLocaleDateString(undefined, {
             year: "numeric",
             month: "short",
             day: "numeric",
           })}
-          .
+          . Every download below is built from exactly that — an older working
+          copy on the AI Builder&apos;s bench cannot replace newer code.
           {manifest.changed ? (
             <>
               {" "}
               <span className="text-foreground">
-                {manifest.changed} file{manifest.changed === 1 ? "" : "s"} changed
-                by the AI Builder
+                {manifest.changed === 1
+                  ? "One file the AI Builder has changed since then"
+                  : `${manifest.changed} files the AI Builder has changed since then`}
               </span>{" "}
-              {manifest.changed === 1 ? "is" : "are"} included in every download
-              below.
+              {manifest.changed === 1
+                ? "is newer than the copy, so it rides on top in every download."
+                : "are newer than the copy, so they ride on top in every download."}
+            </>
+          ) : null}
+          {manifest.superseded ? (
+            <>
+              {" "}
+              {manifest.superseded} older file
+              {manifest.superseded === 1 ? "" : "s"} on the bench predate that
+              copy, so {manifest.superseded === 1 ? "it is" : "they are"} left
+              out of every download — the workshop&apos;s Export project ZIP still
+              holds {manifest.superseded === 1 ? "it" : "them"} if wanted.
             </>
           ) : null}
         </p>

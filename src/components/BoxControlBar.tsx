@@ -21,7 +21,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { ChatRoom } from "@/hooks/use-chat";
+import type { BoxRoom } from "@/hooks/use-chat";
 import { useBoxFiles } from "@/hooks/use-box-files";
 import { downloadText, downloadUrl, readableSize } from "@/lib/download";
 import {
@@ -56,7 +56,7 @@ export type BoxControlBarProps = {
   label: string;
   /** Which box these buttons act on. Decides where uploads land and who can
    *  receive a share. */
-  room: ChatRoom;
+  room: BoxRoom;
   /** What copy, share and download act on — the transcript, the latest answer. */
   text?: string;
   /** Empty this box out. */
@@ -170,7 +170,7 @@ export function BoxControlBar({
     tick("download");
   };
 
-  const share = (target: ChatRoom) => {
+  const share = (target: BoxRoom) => {
     if (!hasText) {
       toast.error(`Nothing in ${label} to share yet.`);
       return;

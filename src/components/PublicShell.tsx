@@ -1,4 +1,4 @@
-import { BrainCircuit, CircuitBoard, Globe, Home } from "lucide-react";
+import { BrainCircuit, CircuitBoard, Home, Server } from "lucide-react";
 import type { ReactNode } from "react";
 import { NavLink, Outlet } from "react-router";
 import { cn } from "@/lib/utils";
@@ -8,7 +8,9 @@ import { cn } from "@/lib/utils";
  *
  * The Local Brain always uses it. The Web Portal and the Offline Brain fall back
  * to it whenever there is no signed-in, unlocked session to open them inside the
- * hub itself — `HubPage` in `main.tsx` decides which of the two frames they get.
+ * hub itself — `HubPage` decides which of the two frames they get. With a
+ * session they do not render here at all: both are sections of the Control Room
+ * now, so `HubPage` lands their addresses on it.
  * None of the three holds anything private, so they sit outside the sign-in and
  * the family password on purpose. That is what makes them reachable on a
  * brand-new device, and what makes them the way in when the Convex deployment is
@@ -20,18 +22,23 @@ import { cn } from "@/lib/utils";
  * as AppShell does.
  */
 const NAV = [
-  { to: "/web-portal", label: "Web Portal", icon: Globe },
+  { to: "/web-portal", label: "Web Portal", icon: Server },
   { to: "/offline-brain", label: "Offline Brain", icon: BrainCircuit },
   { to: "/local-brain", label: "Local Brain", icon: CircuitBoard },
 ];
 
 export function PublicShell({ children }: { children?: ReactNode } = {}) {
   return (
-    // The bottom inset keeps the last row clear of a phone's home indicator
-    // once the hub is installed and running without browser bars.
+    // The insets keep these pages clear of what a phone puts over its own
+    // screen: the bottom one for the home indicator, the left and right ones
+    // for the camera housing when the phone is held sideways.
     <div
       className="flex h-dvh flex-col bg-background text-foreground"
-      style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+      style={{
+        paddingBottom: "env(safe-area-inset-bottom, 0px)",
+        paddingLeft: "env(safe-area-inset-left, 0px)",
+        paddingRight: "env(safe-area-inset-right, 0px)",
+      }}
     >
       <nav className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border/60 px-2 py-2 sm:px-3">
         {NAV.map(({ to, label, icon: Icon }) => (

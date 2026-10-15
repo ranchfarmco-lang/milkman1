@@ -18,6 +18,7 @@
 | `install-agents.sh` | the coding agents + unpacking the Freebuff source |
 | `download-models.sh` | open-weight weights/GGUF by `MODEL_SET` |
 | `capture-freebuff-source.sh` | unpacks the Freebuff source archive that ships in this package |
+| `capture-this-app.sh` | unpacks this app's own source archive (the whole hub) to `source/app` |
 | `serve-local-model.sh` | OpenAI-compatible local server |
 | `verify.sh` | reports present/missing components |
 

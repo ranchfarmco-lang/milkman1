@@ -1,4 +1,4 @@
-import type { ChatRoom } from "@/hooks/use-chat";
+import type { BoxRoom } from "@/hooks/use-chat";
 import { api } from "@/convex/_generated/api";
 import { readableSize } from "@/lib/download";
 import { boxTitle } from "@/lib/internal-share";
@@ -26,7 +26,7 @@ export type BoxFile = {
  * them goes through a function. The same room rules as the messages apply, so
  * the family room is shared and the two AI boxes are yours alone.
  */
-export function useBoxFiles(room: ChatRoom) {
+export function useBoxFiles(room: BoxRoom) {
   const rows = useQuery(api.files.list, { room });
   const generateUploadUrl = useMutation(api.files.generateUploadUrl);
   const attach = useMutation(api.files.attach);
@@ -101,7 +101,7 @@ export function useBoxFiles(room: ChatRoom) {
 
   /** Send one file to another box in the hub. The bytes are not copied. */
   const share = useCallback(
-    async (id: string, target: ChatRoom, name: string) => {
+    async (id: string, target: BoxRoom, name: string) => {
       if (target === room) return false;
 
       try {

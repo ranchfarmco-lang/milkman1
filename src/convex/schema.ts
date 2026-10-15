@@ -16,11 +16,18 @@ export const roleValidator = v.union(
 );
 export type Role = Infer<typeof roleValidator>;
 
-/** The three boxes that hold a conversation. `family` is a roster, not a room. */
+/** The four boxes that hold a conversation. `family` is a roster, not a room. */
 export const roomValidator = v.union(
   v.literal("assistant"),
   v.literal("builder"),
   v.literal("messenger"),
+  /**
+   * The little box that follows you around every page. It is a conversation
+   * like the other two AI boxes — same privacy, kept per signed-in person —
+   * but it is told what is on the screen, because it is meant to help with the
+   * thing in front of you rather than the thing you described.
+   */
+  v.literal("companion"),
 );
 export type Room = Infer<typeof roomValidator>;
 
@@ -314,6 +321,21 @@ const schema = defineSchema(
       familyId: v.optional(v.id("families")),
       // which of the eight voices the AI speaks with for this person
       voice: v.optional(v.string()),
+      // how she says it: speed, warmth, volume and expressiveness, the four
+      // sliders in the Control Room's Voice section. Absent means her own
+      // defaults, which is what Reset puts back.
+      voiceDelivery: v.optional(
+        v.object({
+          speed: v.number(),
+          warmth: v.number(),
+          volume: v.number(),
+          expressiveness: v.number(),
+        }),
+      ),
+      // the studio voice, as "<provider>:<voice>" — the neural speaker rather
+      // than whatever engine the device happens to have. Absent means the
+      // default pair; see src/lib/voice-studio.ts.
+      studioVoice: v.optional(v.string()),
     }).index("email", ["email"]), // index for the email. do not remove or modify
 
     // a family is the unit that can talk to each other
@@ -476,7 +498,10 @@ const schema = defineSchema(
       .index("by_call", ["callId"])
       .index("by_user", ["userId"]),
 
-    // the handshake in transit: offers, answers and network candidates
+    // the handshake in transit: offers, answers, network candidates, and the
+    // two lines that say a shared screen has started or stopped. The picture
+    // itself never comes near this table — only the handshake and the fact that
+    // one of the video tracks is somebody's screen.
     callSignals: defineTable({
       callId: v.id("calls"),
       fromId: v.id("users"),
@@ -485,6 +510,8 @@ const schema = defineSchema(
         v.literal("offer"),
         v.literal("answer"),
         v.literal("ice"),
+        v.literal("screen"),
+        v.literal("screen-off"),
       ),
       payload: v.string(),
       createdAt: v.number(),
@@ -533,6 +560,22 @@ const schema = defineSchema(
       values: v.record(v.string(), v.boolean()),
       updatedAt: v.number(),
     }).index("by_user", ["userId"]),
+
+    /**
+     * The hub's own identity — one row, keyed "hub".
+     *
+     * `address` is the link the hub calls itself: what the Web Portal shows and
+     * copies, and what an invite hands to the next device, instead of whatever
+     * origin the page happened to be opened from. Empty means "use this page's
+     * own address", so a hub that never sets it behaves exactly as before.
+     * The owner sets it in the Control Room; it lives here rather than in the
+     * build so the same hub answers the same way however it is served.
+     */
+    site: defineTable({
+      key: v.string(),
+      address: v.optional(v.string()),
+      updatedAt: v.number(),
+    }).index("by_key", ["key"]),
 
     // what the assistant has been told to remember about you
     memories: defineTable({
@@ -679,6 +722,32 @@ const schema = defineSchema(
       updatedAt: v.number(),
     }).index("by_key", ["key"]),
 
+    // the boxes the assistant installs on the [LIVE] page. One row per box: a
+    // feed the hub fetches itself on a timer, the pipeline that reads it, and
+    // the rows it last found. The page draws whatever is in here, so a box
+    // added in a conversation appears on the wall without anybody editing code.
+    liveBoxes: defineTable({
+      // what the box is called, in the assistant's own words
+      title: v.string(),
+      // the http address the hub fetches
+      url: v.string(),
+      // the pipeline, as the step ids in `live_boxes.ts` (rss, headlines…)
+      pipeline: v.string(),
+      // an optional word or phrase every kept row must contain
+      filter: v.union(v.string(), v.null()),
+      // which hometown this box belongs to, when it is a local one
+      town: v.union(v.string(), v.null()),
+      // why it was installed, in one line
+      why: v.string(),
+      // who installed it
+      ownerId: v.id("users"),
+      // the rows last read, and the source's own line
+      data: v.any(),
+      readAt: v.union(v.number(), v.null()),
+      error: v.union(v.string(), v.null()),
+      createdAt: v.number(),
+    }).index("by_owner", ["ownerId"]),
+
     // the shopping list the meal plan feeds
     shoppingItems: defineTable({
       ownerId: v.id("users"),
@@ -688,6 +757,171 @@ const schema = defineSchema(
       fromEventId: v.optional(v.id("calendarEvents")),
       createdAt: v.number(),
     }).index("by_owner", ["ownerId", "createdAt"]),
+
+    // The browser's own front door keeps its saved pages and its downloads in
+    // the same database as everything else, so a bookmark and a download are
+    // yours on every device rather than in one machine's browser profile.
+    browserBookmarks: defineTable({
+      userId: v.id("users"),
+      url: v.string(),
+      title: v.string(),
+      at: v.number(),
+    }).index("by_user", ["userId", "at"]),
+
+    // A file fetched by the browser, held in Convex storage. The row is the
+    // index of it — what it was, where from, and how big — so the browser can
+    // list it and hand it back long after the page that fetched it is gone.
+    browserDownloads: defineTable({
+      userId: v.id("users"),
+      url: v.string(),
+      name: v.string(),
+      contentType: v.string(),
+      bytes: v.number(),
+      storageId: v.id("_storage"),
+      at: v.number(),
+    }).index("by_user", ["userId", "at"]),
+
+    /**
+     * The hub's own security record — one row, `key: "hub"`.
+     *
+     * It holds the one thing nothing else can be derived from: who the owner
+     * is. The first account to claim the hub becomes the owner; from then on
+     * nobody else can claim it, and only the owner may authorise devices.
+     * `registrationOpen` is deliberately part of the record rather than an
+     * environment variable, so the answer is the same on every server the
+     * deployment can be moved to.
+     */
+    security: defineTable({
+      key: v.string(),
+      ownerUserId: v.optional(v.id("users")),
+      ownerName: v.optional(v.string()),
+      /** True only until an owner exists. There is no public registration. */
+      registrationOpen: v.boolean(),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    }).index("by_key", ["key"]),
+
+    /**
+     * One installation of Sugar.
+     *
+     * A device is the unit of access: the owner authorises a device, and
+     * revoking it takes that device's session away everywhere at once, because
+     * `isUnlocked` (see guard.ts) refuses every private function for a user
+     * with no authorised device. Installing the PWA is the interface — it is
+     * not, and never was, the security.
+     */
+    devices: defineTable({
+      /** Stable, generated on the device itself and kept there. */
+      deviceId: v.string(),
+      installationId: v.string(),
+      userId: v.id("users"),
+      name: v.string(),
+      platform: v.string(),
+      kind: v.string(),
+      status: v.union(
+        v.literal("pending"),
+        v.literal("authorized"),
+        v.literal("revoked"),
+      ),
+      createdAt: v.number(),
+      lastSeenAt: v.number(),
+      authorizedAt: v.optional(v.number()),
+      authorizedBy: v.optional(v.id("users")),
+      revokedAt: v.optional(v.number()),
+      note: v.optional(v.string()),
+    })
+      .index("by_device", ["deviceId"])
+      .index("by_user", ["userId"])
+      .index("by_status", ["status", "lastSeenAt"]),
+
+    /**
+     * The private security log: who did what, and when. Owner-readable only,
+     * and written for the events a person would want to be able to check —
+     * a sign-in, a new device, an authorisation, a revocation.
+     */
+    securityLog: defineTable({
+      at: v.number(),
+      event: v.string(),
+      detail: v.optional(v.string()),
+      actorId: v.optional(v.id("users")),
+      actorName: v.optional(v.string()),
+      deviceId: v.optional(v.string()),
+      deviceName: v.optional(v.string()),
+    }).index("by_at", ["at"]),
+
+    /**
+     * One arrival: who came in, where from, what happened, and when.
+     *
+     * Deliberately its own table rather than more rows in `securityLog`. This
+     * is the list a person is meant to be able to clear, and clearing it must
+     * never erase the security record of authorisations and revocations — and
+     * it must never remove an account or a device. A cleared sign-in is simply
+     * forgotten; everyone can sign in again. That separation is the whole point
+     * of the table, so keep the two apart.
+     */
+    signIns: defineTable({
+      userId: v.id("users"),
+      /** Who, as they were called when this happened. */
+      name: v.optional(v.string()),
+      /** Where: the device's stable id, its name, and the platform it runs. */
+      deviceId: v.optional(v.string()),
+      deviceName: v.optional(v.string()),
+      platform: v.optional(v.string()),
+      /** What happened, in plain words: "Signed in", "Family password accepted". */
+      what: v.string(),
+      at: v.number(),
+    })
+      .index("by_at", ["at"])
+      .index("by_user_device", ["userId", "deviceId", "at"]),
+
+    /**
+     * One trip between a turn running on this deployment and the model server
+     * running on the family's own machine.
+     *
+     * This exists because of a plain fact about addresses: `127.0.0.1` is the
+     * machine that receives the request, and this deployment's server is a
+     * machine in a data centre — so a hub that asked for Ollama from here got
+     * "connection refused" every time, from a machine that will never have one.
+     * The browser is the machine the family is sitting at, so the question is
+     * written down here, carried out by a page of the hub over there, and the
+     * answer is carried back. The turn itself never leaves this deployment, and
+     * every tool it runs still runs here.
+     *
+     * Three rules hold it together:
+     *
+     *   - only an address on loopback is ever relayed (checked on the way in
+     *     here, and again by the page carrying it out),
+     *   - a row belongs to whoever opened it, and only their own pages can see
+     *     it — a family member's browser never carries another's conversation,
+     *   - a row is short-lived. It is waited on by a caller with a deadline, and
+     *     anything left behind is swept rather than kept.
+     */
+    localRelays: defineTable({
+      ownerId: v.id("users"),
+      /** The model server's address. Loopback only, and never a secret. */
+      url: v.string(),
+      /** The request headers, as JSON — content-type, and a key if it has one. */
+      headers: v.string(),
+      /** The request body, as JSON text. */
+      body: v.string(),
+      status: v.union(
+        v.literal("pending"),
+        v.literal("taken"),
+        v.literal("answered"),
+        v.literal("failed"),
+      ),
+      /** Which page picked it up, so two pages cannot both carry it. */
+      workerId: v.optional(v.string()),
+      /** The model server's own status code, when it answered at all. */
+      answerStatus: v.optional(v.number()),
+      answerBody: v.optional(v.string()),
+      /** Why it could not be carried out, in the words the person will read. */
+      answerError: v.optional(v.string()),
+      createdAt: v.number(),
+      expiresAt: v.number(),
+    })
+      .index("by_owner_status", ["ownerId", "status"])
+      .index("by_expires", ["expiresAt"]),
   },
   {
     schemaValidation: false,

@@ -4,7 +4,7 @@ import type { ChatMessage, PanelAccent } from "@/components/MessagePanel";
 import { Button } from "@/components/ui/button";
 import { api } from "@/convex/_generated/api";
 import { useBehindTheScenes, type BehindRow } from "@/hooks/use-behind";
-import type { ChatRoom } from "@/hooks/use-chat";
+import type { BoxRoom } from "@/hooks/use-chat";
 import { splitArtifact } from "@/lib/fences";
 import { cn } from "@/lib/utils";
 import { useQuery } from "convex/react";
@@ -135,7 +135,7 @@ export function PreviewPanel({
   /** Sits in the header, left of the status note. */
   headerAction?: ReactNode;
   /** Which box this preview belongs to, for the control bar in the top-right. */
-  room?: ChatRoom;
+  room?: BoxRoom;
   /** Empty the whole box out, transcript included. */
   onClear?: () => void;
   /** Add a new content box here, from the Add button in the top-right. */

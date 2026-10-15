@@ -79,6 +79,25 @@ else
   done
 fi
 
+echo "== the hub's own app =="
+# The same rule as above: the archive is in the package, so a missing one is a
+# failure. It unpacks to source/app when the installers run; a tree that exists
+# and is missing its own front end means the unpack went wrong.
+if [ -s "$ROOT/source/this-app-source.zip" ]; then
+  echo "  ok   source/this-app-source.zip (ships in the package)"
+else
+  echo "  MISS source/this-app-source.zip"; fail=1
+fi
+if [ ! -d "$ROOT/source/app" ]; then
+  echo "  --   source/app not unpacked yet (scripts/capture-this-app.sh)"
+else
+  for p in source/app/package.json source/app/src/convex \
+           source/app/src/pages source/app/scripts \
+           source/app/src/convex/self_source.ts source/app/public/self-source.json; do
+    if [ -e "$ROOT/$p" ]; then echo "  ok   $p"; else echo "  MISS $p"; fail=1; fi
+  done
+fi
+
 echo "== optional: local model endpoint =="
 if [ -n "${OPENAI_BASE_URL:-}" ]; then
   if curl -sS -m 5 "${OPENAI_BASE_URL%/}/models" >/dev/null 2>&1; then

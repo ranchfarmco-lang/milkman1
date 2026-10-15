@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+    />
+    <title>SUGAR Browser</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="chrome" id="chrome">
+      <div class="tabs" id="tabs"></div>
+
+      <div class="toolbar">
+        <button class="icon" id="back" title="Back" aria-label="Back">
+          <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" /></svg>
+        </button>
+        <button class="icon" id="forward" title="Forward" aria-label="Forward">
+          <svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" /></svg>
+        </button>
+        <button class="icon" id="reload" title="Reload" aria-label="Reload">
+          <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4" /></svg>
+        </button>
+        <button class="icon" id="home" title="Home" aria-label="Home">
+          <svg viewBox="0 0 24 24"><path d="M4 11l8-6 8 6M6 10v9h12v-9" /></svg>
+        </button>
+
+        <form class="omni" id="omni">
+          <span class="lock" id="lock" title="Connection">●</span>
+          <input
+            id="address"
+            type="text"
+            spellcheck="false"
+            autocomplete="off"
+            placeholder="Search or type a website"
+            aria-label="Address and search"
+          />
+          <span class="zoom" id="zoom"></span>
+        </form>
+
+        <button class="pill sugar-open" id="sugar-toggle" title="Ask SUGAR (Ctrl+K)">
+          <span class="dot"></span> SUGAR
+        </button>
+
+        <button class="icon" id="find-toggle" title="Find in page" aria-label="Find in page">
+          <svg viewBox="0 0 24 24"><path d="M10 4a6 6 0 1 0 0 12 6 6 0 0 0 0-12zM15 15l5 5" /></svg>
+        </button>
+        <button class="icon" id="downloads" title="Downloads" aria-label="Downloads">
+          <svg viewBox="0 0 24 24"><path d="M12 4v10m0 0l-4-4m4 4l4-4M5 19h14" /></svg>
+          <span class="badge" id="dl-badge"></span>
+        </button>
+        <button class="icon" id="external" title="Open in the system browser" aria-label="Open outside">
+          <svg viewBox="0 0 24 24"><path d="M14 5h5v5M19 5l-8 8M11 7H6v11h11v-5" /></svg>
+        </button>
+        <button class="icon" id="devtools" title="Developer tools" aria-label="Developer tools">
+          <svg viewBox="0 0 24 24"><path d="M9 8l-4 4 4 4M15 8l4 4-4 4" /></svg>
+        </button>
+      </div>
+
+      <!-- The standard page actions, always there, like every other browser. -->
+      <div class="actions" id="actions">
+        <button class="act" id="act-cut" title="Cut the selection">Cut</button>
+        <button class="act" id="act-copy" title="Copy the selection">Copy</button>
+        <button class="act" id="act-paste" title="Paste">Paste</button>
+        <button class="act" id="act-selectall" title="Select everything on the page">Select all</button>
+        <span class="act-sep"></span>
+        <button class="act" id="act-copylink" title="Copy this page's address">Copy link</button>
+        <button class="act" id="act-openlink" title="Open this address in a new tab">Open link</button>
+        <button class="act" id="act-savepage" title="Save this page into the browser's Downloads folder">Save page</button>
+        <button class="act" id="act-bookmark" title="Bookmark this page">Bookmark</button>
+        <span class="act-sep"></span>
+        <button class="act" id="act-find" title="Find on this page">Find</button>
+        <button class="act danger" id="act-delete" title="Delete this browser's cookies, cache and site data">Delete</button>
+      </div>
+
+      <div class="sugar hidden" id="sugar">
+        <div class="sugar-face" id="sugar-face" data-state="idle" aria-hidden="true">
+          <div class="face">
+            <div class="eyes"><span></span><span></span></div>
+            <div class="mouth"></div>
+            <div class="cheeks"><span></span><span></span></div>
+          </div>
+          <div class="halo"></div>
+        </div>
+
+        <div class="sugar-body">
+          <div class="sugar-row" id="sugar-ask">
+            <input
+              id="sugar-input"
+              type="text"
+              spellcheck="true"
+              autocomplete="off"
+              placeholder="Tell SUGAR what to do — “open google”, “search for Linux Mint”, “compare these pages”…"
+              aria-label="SUGAR command"
+            />
+            <button class="icon mic" id="sugar-mic" title="Speak to SUGAR" aria-label="Speak to SUGAR">
+              <svg viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3" /></svg>
+            </button>
+            <button class="run" id="sugar-run">Do it</button>
+            <button class="icon" id="sugar-gear" title="SUGAR settings" aria-label="SUGAR settings">
+              <svg viewBox="0 0 24 24"><path d="M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.3 1a7 7 0 0 0-1.7-1L14.5 3h-4l-.4 2.6a7 7 0 0 0-1.7 1l-2.3-1-2 3.4L6 11a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7 7 0 0 0 1.7-1l2.3 1 2-3.4-2-1.5c.07-.33.1-.66.1-1z" /></svg>
+            </button>
+            <button class="icon" id="sugar-close" title="Close SUGAR" aria-label="Close SUGAR">
+              <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            </button>
+          </div>
+
+          <div class="sugar-log" id="sugar-log"></div>
+
+          <div class="sugar-settings hidden" id="sugar-settings">
+            <div class="set-grid">
+              <label>Start page <input id="set-home" type="text" placeholder="local:start" /></label>
+              <label>Search <input id="set-search" type="text" placeholder="https://duckduckgo.com/?q=%s" /></label>
+              <label>Theme
+                <select id="set-theme">
+                  <option value="dark">Dark</option>
+                  <option value="light">Light</option>
+                </select>
+              </label>
+              <label class="check"><input id="set-ask" type="checkbox" /> Ask before SUGAR writes or opens files</label>
+              <label class="check"><input id="set-autodetect" type="checkbox" /> Detect local AI models automatically</label>
+              <div class="set-models" id="set-models" role="status">Looking for a model on this machine…</div>
+              <label>Update feed (optional, notify only) <input id="set-feed" type="text" placeholder="https://…/latest.json" /></label>
+              <label class="check"><input id="set-check" type="checkbox" /> Check the feed on launch (never installs by itself)</label>
+            </div>
+            <div class="set-foot">
+              <span class="set-info" id="set-info"></span>
+              <span class="spacer"></span>
+              <button class="link" id="set-updates">Local updates</button>
+              <button class="run" id="set-save">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="findbar hidden" id="findbar">
+        <input id="find-input" type="text" placeholder="Find on this page" autocomplete="off" />
+        <span class="matches" id="find-matches"></span>
+        <button class="icon" id="find-prev" title="Previous" aria-label="Previous match">
+          <svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6" /></svg>
+        </button>
+        <button class="icon" id="find-next" title="Next" aria-label="Next match">
+          <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
+        </button>
+        <button class="icon" id="find-close" title="Close" aria-label="Close find">
+          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        </button>
+      </div>
+
+      <div class="dls hidden" id="dls">
+        <span class="dl-line" id="dl-line">No downloads yet.</span>
+        <button class="link" id="dl-open">Open the folder</button>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

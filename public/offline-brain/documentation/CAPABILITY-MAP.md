@@ -114,3 +114,28 @@ Qdrant, Chroma, Milvus, Weaviate, LanceDB, FAISS, Neo4j), `search/`
 common tools, docs, scripts, tests, build files (Apache-2.0). It ships in this
 package as `source/freebuff-source.zip`; `scripts/capture-freebuff-source.sh`
 unpacks it here during setup, so it is never fetched.
+
+## The hub's own app
+
+`source/app/` — the application this whole package belongs to, in the same
+download as `source/this-app-source.zip`, unpacked by
+`scripts/capture-this-app.sh`. It is worth reading for the same reason the
+reference source is: it is a working implementation, of this system, that runs.
+Where each layer above has a component, here is where the app itself does it:
+
+| Capability | Where it lives in `source/app/` |
+| --- | --- |
+| The assistant (models, keys, fallbacks, memory of the conversation) | `src/convex/ai.ts`, `src/convex/ai_turn.ts`, `src/convex/memories.ts` |
+| The builder that changes the app itself | `src/components/BuilderMirror.tsx`, `src/convex/sandbox.ts`, `src/lib/self-changes.ts` |
+| A brain in the browser, with no server | `src/lib/browser-brain.ts`, `src/components/BrowserDock.tsx` |
+| Pairing with the local brain in this package | `src/lib/local-brain.ts`, `src/convex/localRelays.ts`, `src/pages/LocalBrain.tsx` |
+| Code search, files and the workspace bench | `src/convex/workspace.ts`, `src/convex/search.ts`, `src/lib/forge/` |
+| Messenger, voice and video calls | `src/convex/messages.ts`, `src/convex/calls.ts`, `src/components/CallProvider.tsx` |
+| Calendar, people, reminders | `src/convex/calendar.ts`, `src/convex/people.ts`, `src/convex/reminders.ts` |
+| The Control Room (devices, sign-ins, security, downloads) | `src/pages/ControlRoom.tsx`, `src/components/BackupPanel.tsx` |
+| Downloading all of this — the app, the brain, the data | `src/lib/backup.ts`, `src/lib/platform-downloads.ts`, `src/lib/brain-bundles.ts` |
+| Its own checks, run the way this package's tests are | `scripts/this-app-check.ts`, `scripts/call-check.ts`, `scripts/verify-self.mjs` |
+
+The app carries this package inside it too (`source/app/public/offline-brain/`),
+which is where the Offline Brain page you are reading about here is served from:
+the hub hands out the very files it ships with.

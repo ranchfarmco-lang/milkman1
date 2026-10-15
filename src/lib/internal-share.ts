@@ -6,34 +6,34 @@
  * content between the boxes with no share sheet, no mail client and no other
  * app involved.
  */
-import type { ChatRoom } from "@/hooks/use-chat";
+import type { BoxRoom } from "@/hooks/use-chat";
 
 /** Where each box lives, so its link is one string away. */
-export const BOX_PATHS: Record<ChatRoom, string> = {
+export const BOX_PATHS: Record<BoxRoom, string> = {
   assistant: "/assistant",
   builder: "/builder",
   messenger: "/messenger",
 };
 
-const BOX_TITLES: Record<ChatRoom, string> = {
+const BOX_TITLES: Record<BoxRoom, string> = {
   assistant: "AI Assistant",
   builder: "AI Builder",
   messenger: "Family Messenger",
 };
 
-export function boxTitle(room: ChatRoom) {
+export function boxTitle(room: BoxRoom) {
   return BOX_TITLES[room];
 }
 
 /** The address of one box, for the Link button. */
-export function boxLink(room: ChatRoom) {
+export function boxLink(room: BoxRoom) {
   if (typeof window === "undefined") return BOX_PATHS[room];
   return `${window.location.origin}${BOX_PATHS[room]}`;
 }
 
 /** Every box except this one — the only places a share can be sent. */
-export function otherBoxes(room: ChatRoom): ChatRoom[] {
-  return (Object.keys(BOX_PATHS) as ChatRoom[]).filter((key) => key !== room);
+export function otherBoxes(room: BoxRoom): BoxRoom[] {
+  return (Object.keys(BOX_PATHS) as BoxRoom[]).filter((key) => key !== room);
 }
 
 /**
@@ -87,7 +87,7 @@ export const HANDOFF_EVENT = "family-chat-hub:handoff";
  * assistant and then to the builder before either was opened would quietly lose
  * the first send; this way each box has its own and both arrive.
  */
-function handoffKey(room: ChatRoom) {
+function handoffKey(room: BoxRoom) {
   return `${HANDOFF_KEY}:${room}`;
 }
 
@@ -96,7 +96,7 @@ function handoffKey(room: ChatRoom) {
  * what makes a share work whether the other box is open in another pane or the
  * person walks over to it a minute later.
  */
-export function shareToBox(room: ChatRoom, text: string) {
+export function shareToBox(room: BoxRoom, text: string) {
   const clean = text.trim();
   if (!clean) return false;
 
@@ -114,7 +114,7 @@ export function shareToBox(room: ChatRoom, text: string) {
 }
 
 /** Take the content waiting for this box, if any. It is claimed only once. */
-export function takeHandoff(room: ChatRoom): string | null {
+export function takeHandoff(room: BoxRoom): string | null {
   const key = handoffKey(room);
 
   try {
@@ -122,7 +122,7 @@ export function takeHandoff(room: ChatRoom): string | null {
     if (!raw) return null;
 
     const parsed = JSON.parse(raw) as {
-      room?: ChatRoom;
+      room?: BoxRoom;
       text?: string;
       at?: number;
     };

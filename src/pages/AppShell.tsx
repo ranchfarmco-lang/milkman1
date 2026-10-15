@@ -1,18 +1,20 @@
 import { CallProvider } from "@/components/CallProvider";
+import { CompanionBox } from "@/components/CompanionBox";
 import { Button } from "@/components/ui/button";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
 import { useDeviceEffects } from "@/hooks/use-device-effects";
+import { useLocalRelay } from "@/hooks/use-local-relay";
 import { useAssistantNudge } from "@/hooks/use-nudge";
 import { usePresence } from "@/hooks/use-presence";
+import { AssistantIcon } from "@/lib/assistant-mark";
+import { setHubAiClient } from "@/lib/forge/hub-ai";
 import { cn } from "@/lib/utils";
-import { useMutation, useQuery } from "convex/react";
+import { useConvex, useMutation, useQuery } from "convex/react";
 import { useEffect, type ReactNode } from "react";
 import {
-  BrainCircuit,
   CalendarDays,
-  Church,
-  Globe,
+  Compass,
   Hammer,
   Lock,
   LogOut,
@@ -27,15 +29,33 @@ import { toast } from "sonner";
 /**
  * The running order of the tabs, left to right. Calendar sits between the
  * Messenger and the Control Room, as asked.
+ *
+ * The Web Portal and the Offline Brain used to sit here as two more tabs. They
+ * are sections of the Control Room now, so their tabs are gone: one page holds
+ * them, and a tab that led to a second copy of the same thing would be exactly
+ * the arrangement the merge undid. Their addresses still work — signed in, each
+ * one opens the Control Room with its section at the top.
  */
 const NAV: { to: string; label: string; icon: LucideIcon }[] = [
-  { to: "/assistant", label: "AI Assistant", icon: Church },
+  // The browser leads: it is the hub's front door, and everything else is one
+  // tap from its home.
+  { to: "/browser", label: "Browser", icon: Compass },
+  { to: "/assistant", label: "AI Assistant", icon: AssistantIcon },
+  // One tab, not two: the apps the builder makes are the builder page's own
+  // first box, so an App Sandbox tab beside it would be a second copy of the
+  // same page — exactly the arrangement the merge undid. `/app-sandbox` still
+  // lands here, so an old link or a bookmark is not broken by the tab going.
   { to: "/builder", label: "AI Builder", icon: Hammer },
+  //
+  // This App used to sit beside it as a tab of its own. It is a box of the AI
+  // Builder page now — the sandbox there holds a copy of this project, so the
+  // request that changes the hub, the check in the mirror and the files that
+  // carry it in are all on the page whose job that is. Two tabs for one builder
+  // with two targets was the thing a person had to guess at; `/this-app` still
+  // lands on that page, so nothing that linked to it is broken.
   { to: "/messenger", label: "Messenger", icon: MessageCircle },
   { to: "/calendar", label: "Calendar", icon: CalendarDays },
   { to: "/control-room", label: "Control Room", icon: SlidersHorizontal },
-  { to: "/web-portal", label: "Web Portal", icon: Globe },
-  { to: "/offline-brain", label: "Offline Brain", icon: BrainCircuit },
   { to: "/live", label: "[LIVE]", icon: Radio },
 ];
 
@@ -47,6 +67,21 @@ export default function AppShell({ children }: { children?: ReactNode } = {}) {
   useDeviceEffects();
   // The assistant speaks up on its own, from any page, only on a real alert.
   useAssistantNudge();
+  // A model running on this machine is asked through this page, so the hub's
+  // server never dials 127.0.0.1 and finds its own data centre there.
+  useLocalRelay();
+
+  // The forge's crew thinks with the hub's own models by default, and those
+  // calls go through `ai.complete` — a walk a signed-in tab is allowed to make
+  // and a page opened outside the app is not. This is the one place that has
+  // the client carrying this browser's session, so it is handed over here and
+  // taken back when the shell goes, rather than left behind for a page that
+  // outlives the sign-in.
+  const convex = useConvex();
+  useEffect(() => {
+    setHubAiClient(convex);
+    return () => setHubAiClient(null);
+  }, [convex]);
 
   // Everyone who can open the app belongs to the same family, so the messenger
   // and the contacts work the moment anyone arrives.
@@ -72,19 +107,27 @@ export default function AppShell({ children }: { children?: ReactNode } = {}) {
   // Re-locking is only offered when there is a password to be asked for again.
   const accessState = useQuery(api.access.state);
   const lockDevice = useMutation(api.access.lock);
-  const canLock = accessState?.required === true && accessState.unlocked === true;
+  const canLock =
+    accessState?.required === true && accessState.unlocked === true;
 
-  // The bottom inset keeps the last row clear of a phone's home indicator once
-  // the hub is installed and running without browser bars. It is an inline style
-  // rather than a utility so it cannot be dropped for being unrecognised, and it
-  // resolves to 0px everywhere the inset does not exist.
+  // The insets keep the app clear of what a phone puts over its own screen: the
+  // bottom one for the home indicator once the hub is installed and running
+  // without browser bars, and the left and right ones for the camera housing
+  // when the phone is held sideways (the viewport is `viewport-fit=cover`, so
+  // in landscape the notch sits over the page rather than beside it). Inline
+  // styles rather than utilities so they cannot be dropped for being
+  // unrecognised, and they resolve to 0px everywhere the insets do not exist.
   return (
     <div
       className="flex h-dvh flex-col bg-background text-foreground"
-      style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
+      style={{
+        paddingBottom: "env(safe-area-inset-bottom, 0px)",
+        paddingLeft: "env(safe-area-inset-left, 0px)",
+        paddingRight: "env(safe-area-inset-right, 0px)",
+      }}
     >
       {/* Every tab stays visible at the top. The strip wraps onto a second line
-          when the window is too narrow to hold all eight, rather than scrolling
+          when the window is too narrow to hold them all, rather than scrolling
           sideways — a tab parked off the right edge is a page nobody finds, and
           the last one in the row is always [LIVE]. */}
       <nav className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border/60 px-2 py-2 sm:px-3">
@@ -116,7 +159,9 @@ export default function AppShell({ children }: { children?: ReactNode } = {}) {
             className="ml-auto shrink-0 text-muted-foreground hover:text-foreground"
             onClick={() => {
               void lockDevice({}).then(() =>
-                toast.success("Locked. The family password is asked for again."),
+                toast.success(
+                  "Locked. The family password is asked for again.",
+                ),
               );
             }}
           >
@@ -149,6 +194,16 @@ export default function AppShell({ children }: { children?: ReactNode } = {}) {
           {children ?? <Outlet />}
         </CallProvider>
       </div>
+
+      {/* The companion sits outside the page frame rather than inside it, so
+          moving between tabs never unmounts it: one conversation, one shared
+          microphone, one place the page writes down what is on screen — the
+          same box wherever they go. It is here rather than higher up because
+          its turn is a signed-in one, and this shell is the outermost part of
+          the app that is only ever reached with a session; the public pages —
+          the Web Portal, the Offline Brain, the local brain — are opened
+          without one and are deliberately left alone. */}
+      <CompanionBox />
     </div>
   );
 }

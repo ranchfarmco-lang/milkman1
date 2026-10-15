@@ -57,6 +57,17 @@ else
   echo "    WARN python3 is missing, so the brain cannot run yet" >&2
 fi
 
+# The hub's own app rides in this package too. Unpacking it here is what makes
+# the drive hold the whole system — the application as well as the stack it is
+# built on — and it downloads nothing: the archive came with the package.
+echo
+echo "==> The hub's own app (source/app)"
+if [ -s source/this-app-source.zip ]; then
+  ./scripts/capture-this-app.sh
+else
+  echo "    WARN source/this-app-source.zip is missing from this copy" >&2
+fi
+
 echo
 echo "=============================================================="
 echo " Done. Everything lives in: $HERE"
@@ -69,6 +80,7 @@ echo "                        tools and diagnostics are all there."
 echo "   2. Serve a model    ./scripts/serve-local-model.sh"
 echo "                       (set MODEL= to the model you downloaded)"
 echo "   3. Point agents at  export OPENAI_BASE_URL=http://localhost:8000/v1"
-echo "   4. The Freebuff source is in source/freebuff — unpacked from the"
-echo "      archive that came in this package, so nothing was downloaded"
+echo "   4. The Freebuff source is in source/freebuff, and the hub's own app"
+echo "      is in source/app — both unpacked from archives that came in this"
+echo "      package, so nothing was downloaded for either"
 echo "=============================================================="

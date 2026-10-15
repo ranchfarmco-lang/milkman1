@@ -33,14 +33,19 @@ export const EMAIL_NAME = "Proton Mail";
 export const FULL_PACKAGE = "install-offline-brain.sh";
 
 /**
- * Its weight: the whole package (68 files — the brain, every installer and the
- * Freebuff source archive) plus the unpacking wrapper. It is one script, not a
- * zip: the text files go in as here-documents and the archive as base64, so
- * running it needs nothing but bash and `base64`. It still fetches the software
- * and the model weights, because those are tens of gigabytes and belong on the
- * machine, not in a download.
+ * Its weight: the whole package (70 files — 68 of them text, plus the Freebuff
+ * source archive and this app's own source archive) plus the unpacking wrapper.
+ * It is one script, not a zip: the text files go in as here-documents and the
+ * two archives as base64, so running it needs nothing but bash and `base64`. It
+ * still fetches the software and the model weights, because those are tens of
+ * gigabytes and belong on the machine, not in a download.
+ *
+ * The figure below is the script that is really built from this package — 33.3
+ * MB — and it is the one thing on the page that is shown before the hub has
+ * answered: `installerBytes` works the same size out from the live measurement,
+ * and the page prints that instead the moment it has one.
  */
-export const FULL_PACKAGE_SIZE = "~27 MB";
+export const FULL_PACKAGE_SIZE = "~33 MB";
 
 /**
  * The three editions, and what each one is for.
@@ -74,8 +79,8 @@ export const EDITIONS: Edition[] = [
   {
     id: "local",
     label: "Local (offline)",
-    what: "The Python brain and every installer — coding, browser, terminal and research tools, model runtimes, and the model downloader — for a machine you own.",
-    includes: ["Python brain", "all installers", "model sets", "capability map", "smoke tests"],
+    what: "The Python brain and every installer — coding, browser, terminal and research tools, model runtimes, and the model downloader — for a machine you own, with the hub's own app, whole, in the same archive.",
+    includes: ["Python brain", "all installers", "model sets", "this app itself", "capability map", "smoke tests"],
     build: "local-installer",
   },
   {
@@ -145,11 +150,14 @@ export const REQUIREMENTS: Requirement[] = [
     required: true,
   },
   {
-    name: "Package + Freebuff source",
+    name: "Package + both source trees",
     blurb:
-      "The extracted package, its docs and the full Freebuff/Codebuff reference source tree.",
+      "The extracted package, its docs, the full Freebuff/Codebuff reference tree and the hub's own app, whole.",
     where: "drive",
-    size: "~25 MB",
+    // 450 KB of package text, 58.3 MB of unpacked reference tree and 19.9 MB of
+    // unpacked app — the two archives weigh 24.3 MB coming in, eight times that
+    // once they are on the drive.
+    size: "~79 MB",
     required: true,
   },
   {
@@ -225,24 +233,31 @@ export function allPackagedFiles(): string[] {
 }
 
 /**
- * Exact sizes of the packaged files, so every button can say what it hands you
- * before you press it.
+ * The sizes of the packaged files, so every button can say what it hands you
+ * even before the hub answers.
+ *
+ * These are the fallback, not the truth. The Offline Brain page asks this hub
+ * for every packaged path when it opens and prints what came back (see
+ * `measurePackage`); a figure from here is shown only for a file that did not
+ * answer, and the row says so in its own tooltip. They were taken from the
+ * files themselves — `bun run test:this-app` compares every one of them against
+ * the file on disk, so they cannot quietly drift again.
  */
 export const FILE_SIZES: Record<string, string> = {
-  "GET-EVERYTHING.sh": "2.6 KB",
-  "README.md": "5.0 KB",
+  "GET-EVERYTHING.sh": "3.2 KB",
+  "README.md": "7.7 KB",
   "agents/README.md": "1.3 KB",
   "browser-tools/README.md": "934 B",
   "coding-tools/README.md": "1.0 KB",
   "configuration/README.md": "429 B",
-  "configuration/catalog.json": "4.6 KB",
+  "configuration/catalog.json": "5.3 KB",
   "configuration/env.sh": "217 B",
   "configuration/litellm.example.yaml": "1.1 KB",
   "context/README.md": "957 B",
   "databases/README.md": "1.1 KB",
-  "documentation/ARCHITECTURE.md": "5.1 KB",
-  "documentation/CAPABILITY-MAP.md": "5.6 KB",
-  "documentation/LICENSES.md": "2.4 KB",
+  "documentation/ARCHITECTURE.md": "5.2 KB",
+  "documentation/CAPABILITY-MAP.md": "8.3 KB",
+  "documentation/LICENSES.md": "2.5 KB",
   "documentation/OFFLINE-GUIDE.md": "2.4 KB",
   "documentation/README.md": "355 B",
   "embeddings/README.md": "718 B",
@@ -256,8 +271,9 @@ export const FILE_SIZES: Record<string, string> = {
   "reasoning/README.md": "1.0 KB",
   "research-tools/README.md": "720 B",
   "runtimes/README.md": "844 B",
-  "scripts/README.md": "1.4 KB",
-  "scripts/capture-freebuff-source.sh": "1.1 KB",
+  "scripts/README.md": "1.5 KB",
+  "scripts/capture-freebuff-source.sh": "2.2 KB",
+  "scripts/capture-this-app.sh": "3.3 KB",
   "scripts/download-models.sh": "3.9 KB",
   "scripts/install-agents.sh": "2.8 KB",
   "scripts/install-browser-tools.sh": "2.2 KB",
@@ -276,7 +292,8 @@ export const FILE_SIZES: Record<string, string> = {
   "scripts/setup-all.sh": "998 B",
   "scripts/verify.sh": "2.4 KB",
   "source/freebuff-source.zip": "18.9 MB",
-  "brain/README.md": "17.1 KB",
+  "source/this-app-source.zip": "5.4 MB",
+  "brain/README.md": "17.8 KB",
   "brain/brain.py": "28.6 KB",
   "brain/src/__init__.py": "523 B",
   "brain/src/agent.py": "24.8 KB",
@@ -285,18 +302,18 @@ export const FILE_SIZES: Record<string, string> = {
   "brain/src/connectors.py": "20.5 KB",
   "brain/src/diagnostics.py": "18.0 KB",
   "brain/src/info.py": "24.1 KB",
-  "brain/src/providers.py": "12.6 KB",
+  "brain/src/providers.py": "16.8 KB",
   "brain/src/scheduler.py": "11.4 KB",
-  "brain/src/server.py": "32.1 KB",
+  "brain/src/server.py": "34.5 KB",
   "brain/src/store.py": "26.1 KB",
-  "brain/src/tools.py": "31.6 KB",
+  "brain/src/tools.py": "36.7 KB",
   "brain/src/updater.py": "14.8 KB",
-  "brain/tests/test_brain.py": "31.7 KB",
+  "brain/tests/test_brain.py": "33.6 KB",
   "search/README.md": "742 B",
-  "source/README.md": "1.7 KB",
+  "source/README.md": "4.6 KB",
   "terminal-tools/README.md": "668 B",
   "tests/README.md": "508 B",
-  "tests/smoke.sh": "3.3 KB",
+  "tests/smoke.sh": "4.5 KB",
   [FULL_PACKAGE]: FULL_PACKAGE_SIZE,
 };
 
@@ -702,15 +719,18 @@ export const BRAIN_GROUPS: BrainGroup[] = [
   },
   {
     id: "source",
-    title: "Freebuff source",
+    title: "Source — this app, and Freebuff",
     icon: "package",
     summary:
-      "The complete Freebuff (Codebuff) TypeScript/Bun monorepo — the reference implementation of every layer here. Apache-2.0.",
+      "The hub's own app, whole, and the complete Freebuff (Codebuff) TypeScript/Bun monorepo it was built alongside — the reference implementation of every layer here. Both archives are already in this download; an installer only unpacks them.",
     items: [
-      { name: "Freebuff source", blurb: "Unpacks the full source tree that ships in the package: agents, SDK, CLI, agent-runtime, code-map, tools, docs and tests. Nothing is downloaded.", meta: "Apache-2.0 · 18.9 MB", repo: "https://github.com/CodebuffAI/freebuff", script: script("unpack Freebuff source", 'bash scripts/capture-freebuff-source.sh\necho "extracted to ./source/freebuff"') },
-      { name: "freebuff-source.zip", blurb: "The upstream archive itself, exactly as it ships inside this package: the whole Freebuff (Codebuff) monorepo, 1,773 files.", file: "source/freebuff-source.zip", size: "18.9 MB" },
-      { name: "capture-freebuff-source.sh", blurb: "Unpacks the archive above onto the drive, then runs bun install inside it.", file: "scripts/capture-freebuff-source.sh" },
-      { name: "Source README", blurb: "A map of the tree, pointing at the tools and agents.", file: "source/README.md" },
+      { name: "This app — the hub itself", blurb: "Unpacks the whole hub this package belongs to: every page and Convex function, the shell, the desktop SUGAR browser, the native host, NOVA OS and the docs, with the two generated halves of its own snapshot so the copy builds as it stands. Run it with bun run own.", meta: "the app, not the reference", script: script("unpack this app", 'bash scripts/capture-this-app.sh\necho "the hub is at ./source/app"') },
+      { name: "this-app-source.zip", blurb: "The hub's own source archive, exactly as it ships inside this package, rooted at app/ — the same file set the app's AI Builder reads and every Control Room backup is taken from. 437 files; 19.9 MB unpacked.", file: "source/this-app-source.zip", size: "5.4 MB" },
+      { name: "capture-this-app.sh", blurb: "Unpacks the app archive to source/app, and prints the three ways to run it.", file: "scripts/capture-this-app.sh" },
+      { name: "Freebuff source", blurb: "Unpacks the full reference source tree that ships in the package: agents, SDK, CLI, agent-runtime, code-map, tools, docs and tests. Nothing is downloaded.", meta: "Apache-2.0 · 18.9 MB", repo: "https://github.com/CodebuffAI/freebuff", script: script("unpack Freebuff source", 'bash scripts/capture-freebuff-source.sh\necho "extracted to ./source/freebuff"') },
+      { name: "freebuff-source.zip", blurb: "The upstream archive itself, exactly as it ships inside this package: the whole Freebuff (Codebuff) monorepo, 1,773 files; 58.3 MB unpacked.", file: "source/freebuff-source.zip", size: "18.9 MB" },
+      { name: "capture-freebuff-source.sh", blurb: "Unpacks the reference archive above onto the drive, then runs bun install inside it.", file: "scripts/capture-freebuff-source.sh" },
+      { name: "Source README", blurb: "A map of both trees: the hub's own app, and the reference implementation beside it.", file: "source/README.md" },
     ],
   },
   {
@@ -953,6 +973,13 @@ export const BRAIN_STATS = {
  * What "everything" actually weighs, so nobody guesses. Model figures are the
  * full-precision weights `download-models.sh` fetches; the software figure is
  * the installed footprints of the runtimes, tools and agent environments.
+ *
+ * These are the figures that cannot be measured here, because the weights and
+ * the installed software live on the machine rather than on this hub. The two
+ * that can be measured — the package this hub is serving and the one-file
+ * installer built from it — are not listed here at all: the Offline Brain page
+ * measures them when it opens (see `measurePackage` in `offline-brain-files`) so
+ * they change the moment a file does.
  */
 export const SIZE_SUMMARY: { label: string; value: string; note: string }[] = [
   {
@@ -975,13 +1002,8 @@ export const SIZE_SUMMARY: { label: string; value: string; note: string }[] = [
   },
   {
     label: "The brain itself",
-    value: "~318 KB",
+    value: "~334 KB",
     note: "Python 3 and nothing else — no packages to install",
-  },
-  {
-    label: "The installer file",
-    value: "~27 MB",
-    note: "one script — it carries the package and the source, and fetches the software and weights",
   },
 ];
 

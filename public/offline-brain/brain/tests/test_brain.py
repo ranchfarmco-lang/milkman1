@@ -614,12 +614,59 @@ class TestHttpApi(TempBrain):
         status, payload = self.call("/api/v1/memory", token="wrong-token")
         self.assertEqual(status, 401)
 
+    def test_completions_needs_the_token(self) -> None:
+        """The relay is a door like any other: no token, no way through."""
+        status, payload = self.call(
+            "/api/v1/completions",
+            "POST",
+            {"url": "http://127.0.0.1:11434/v1/chat/completions", "payload": {}},
+            token=None,
+        )
+        self.assertEqual(status, 401)
+        self.assertFalse(payload["ok"])
+
+    def test_completions_refuses_anything_off_this_machine(self) -> None:
+        """"Ask the model" must never become "fetch anything we can reach"."""
+        payload = {"model": "x", "messages": []}
+        for url in (
+            "https://example.com/v1/chat/completions",
+            "http://192.168.1.9:11434/v1/chat/completions",
+            "file:///etc/passwd",
+        ):
+            status, answer = self.call(
+                "/api/v1/completions", "POST", {"url": url, "payload": payload}
+            )
+            self.assertEqual(status, 502, (url, answer))
+            self.assertFalse(answer["ok"])
+            self.assertIn("this machine", answer["error"])
+
+    def test_completions_needs_a_chat_route_on_a_known_port(self) -> None:
+        """Loopback alone is not enough: it has to be a model server."""
+        payload = {"model": "x", "messages": []}
+        status, answer = self.call(
+            "/api/v1/completions",
+            "POST",
+            {"url": "http://127.0.0.1:9/v1/chat/completions", "payload": payload},
+        )
+        self.assertEqual(status, 502)
+        self.assertIn("port 9", answer["error"])
+
+        status, answer = self.call(
+            "/api/v1/completions",
+            "POST",
+            {"url": "http://127.0.0.1:11434/api/push", "payload": payload},
+        )
+        self.assertEqual(status, 502)
+        self.assertIn("chat", answer["error"])
+
     def test_the_protocol_lists_its_endpoints(self) -> None:
         status, payload = self.call("/api/v1/protocol", token=None)
         self.assertEqual(status, 200)
         paths = {entry["path"] for entry in payload["endpoints"]}
         self.assertIn("/api/v1/ask", paths)
         self.assertIn("/api/v1/memory", paths)
+        # The route a hub page uses to reach a model on this machine.
+        self.assertIn("/api/v1/completions", paths)
 
     def test_pairing_confirms_a_token(self) -> None:
         status, payload = self.call("/api/v1/pair")

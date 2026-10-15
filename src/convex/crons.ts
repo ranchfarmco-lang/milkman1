@@ -20,17 +20,19 @@ crons.interval(
 );
 
 /**
- * Rebuild the [LIVE] board twice a day: 5am and 2pm, Colorado time.
+ * Rebuild the [LIVE] board three times a day: 5am, 8am and 2pm, Colorado time.
  *
  * It used to run every half hour — 48 rebuilds a day of the heaviest job in the
- * hub, for a board whose sources move slowly. Twice is what was asked for: once
- * before the day starts, once in the afternoon.
+ * hub, for a board whose sources move slowly. Three is what was asked for: 5am
+ * for the full check — the weather, the markets, and the hometown papers,
+ * calendars and sale feeds for Grand Junction, Rifle and Cañon City — 8am to
+ * write the morning rundown over that check, and 2pm for the afternoon.
  *
  * The timer fires hourly and the *handler* decides whether this is one of the
- * two hours, rather than the schedule naming an hour in UTC. Colorado is UTC-6
+ * three hours, rather than the schedule naming an hour in UTC. Colorado is UTC-6
  * in summer and UTC-7 in winter, so a fixed UTC hour drifts by an hour twice a
  * year — 5am would quietly become 4am for half of it. Asking "what hour is it
- * in Denver" keeps the two times where they were put.
+ * in Denver" keeps the three times where they were put.
  *
  * Refresh on the page still rebuilds it immediately: a person wanting it now is
  * a different thing from a timer deciding.
@@ -39,6 +41,21 @@ crons.interval(
   "check whether it is time to rebuild the live board",
   { hours: 1 },
   internal.briefing.tick,
+  {},
+);
+
+/**
+ * Re-read the boxes the assistant installed on the [LIVE] page.
+ *
+ * A box somebody asked for — a feed, a sale board, an events calendar — is
+ * theirs to keep, so it is fetched on its own timer rather than only when they
+ * press Refresh. It runs on the hour, between the board's three rebuilds, so
+ * one box answering slowly never holds up the board itself.
+ */
+crons.interval(
+  "re-read the boxes installed on the live page",
+  { hours: 1 },
+  internal.live_boxes.refreshAll,
   {},
 );
 

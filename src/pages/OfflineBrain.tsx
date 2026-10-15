@@ -4,11 +4,15 @@ import { api } from "@/convex/_generated/api";
 import {
   backupZip,
   offlineBrainZip,
+  readShippedSource,
+  readSource,
   stampOf,
   type HubBackup,
   type SourceMap,
+  type SourceResult,
 } from "@/lib/backup";
 import { downloadBlob, readableSize } from "@/lib/download";
+import { useHubAddress } from "@/lib/hub-address";
 import {
   buildSelfInstaller,
   bytesToBase64,
@@ -37,8 +41,17 @@ import {
   groupBundleFileCount,
   groupBundleName,
   groupBundleZip,
+  groupPackagedPaths,
 } from "@/lib/brain-bundles";
-import { PACKAGE_ALL_FILES, PACKAGE_BINARY_FILES, PACKAGE_FILES } from "@/lib/offline-brain-files";
+import {
+  PACKAGE_ALL_FILES,
+  PACKAGE_BINARY_FILES,
+  PACKAGE_FILES,
+  installerBytes,
+  measurePackage,
+  measuredBytes,
+  type PackageMeasure,
+} from "@/lib/offline-brain-files";
 import {
   PLATFORMS,
   PLATFORM_BY_ID,
@@ -79,6 +92,7 @@ import {
   Network,
   Package,
   Rocket,
+  Ruler,
   Search,
   ShieldCheck,
   Smartphone,
@@ -86,7 +100,7 @@ import {
   Usb,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 const RISE = {
@@ -135,9 +149,6 @@ function slug(name: string) {
       .slice(0, 50) || "component"
   );
 }
-
-/** What the snapshot sources hand back, live or bundled. */
-type SourceResult = { at: string; files: SourceMap; patched?: string[] };
 
 /** Chrome's "save as" dialog, not yet in the TypeScript DOM types. */
 type SaveFileHandle = {
@@ -276,16 +287,26 @@ async function saveScript(
   return false;
 }
 
-/** The size to print beside a button: the catalog's, or the script's own. */
-function displaySize(item: BrainItem): string {
+/**
+ * The size to print beside a button, and where it came from: what this hub is
+ * serving for the file when the page has measured it, otherwise the catalog's
+ * (which is only right for the things this hub does not serve — the model
+ * weights), otherwise the generated script's own bytes.
+ */
+function displaySize(
+  item: BrainItem,
+  measure: PackageMeasure | null,
+): { text: string; measured: boolean } {
+  const served = item.file ? measure?.sizes[item.file] : undefined;
+  if (served !== undefined) return { text: readableSize(served), measured: true };
   const known = sizeOf(item);
-  if (known) return known;
+  if (known) return { text: known, measured: false };
   const body = itemScript(item);
-  if (!body) return "";
-  return readableSize(new Blob([body]).size);
+  if (!body) return { text: "", measured: false };
+  return { text: readableSize(new Blob([body]).size), measured: false };
 }
 
-function OfflineBrain() {
+export function OfflineBrain() {
   const convex = useConvex();
   const [query, setQuery] = useState("");
   const [copied, setCopied] = useState(false);
@@ -294,29 +315,87 @@ function OfflineBrain() {
   // Which machine this is for. Guessed from the browser, then yours to change.
   const [platformId, setPlatformId] = useState<PlatformId>(() => guessPlatform());
   const chosenPlatform = PLATFORM_BY_ID[platformId];
+
+  /**
+   * What this hub is serving for the package, measured rather than remembered.
+   *
+   * Measured when the page opens and again whenever you ask. The size a button
+   * shows used to be a number typed into the catalog on the day it was written,
+   * which cannot move when the file does — a page of labels could show last
+   * month's figures and look perfectly healthy. This asks for every packaged
+   * path and reads each size off the response, so what is printed here is what
+   * the hub holds now, and it changes the moment a file changes. See
+   * `measurePackage`. A category or the installer that cannot be totalled — a
+   * file not answering — is shown as unavailable rather than guessed at.
+   */
+  const [measure, setMeasure] = useState<PackageMeasure | null>(null);
+  const [measuring, setMeasuring] = useState(true);
+
+  const measureNow = useCallback(async () => {
+    setMeasuring(true);
+    try {
+      setMeasure(await measurePackage());
+    } finally {
+      setMeasuring(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Measure when the page opens. Not `measureNow` itself: that turns the
+    // spinner on first, and `measuring` already begins true — and setting state
+    // in the body of an effect is the cascading render React warns about.
+    let live = true;
+    void measurePackage()
+      .then((result) => {
+        if (live) setMeasure(result);
+      })
+      .finally(() => {
+        if (live) setMeasuring(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  /** The clock time of the measurement, so every figure can be dated. */
+  const measuredAt = measure
+    ? new Date(measure.at).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "";
+
+  /**
+   * `install-offline-brain.sh`, the package as one script: worked out from the
+   * measurement (its text files as they are, the archive inside it as base64),
+   * so this figure moves with the package too. The catalog's "~27 MB" is kept
+   * only for the moment before the measurement lands, or when the hub will not
+   * answer at all.
+   */
+  const installerSize = installerBytes(measure);
+  const installerLabel =
+    installerSize !== null
+      ? readableSize(installerSize)
+      : measure
+        ? FULL_PACKAGE_SIZE
+        : "measuring…";
   const ChosenPlatformIcon = PLATFORM_ICONS[chosenPlatform.icon] ?? Package;
 
-  const address =
-    typeof window === "undefined"
-      ? ""
-      : `${window.location.origin}/offline-brain`;
+  const address = useHubAddress();
+  const pageAddress = address ? `${address}offline-brain` : "";
 
   /**
    * The app snapshot for the web and everything editions: the live database's
-   * copy first (with any Builder fixes), and the copy bundled into this page
-   * when the database will not answer — the same fallback the Control Room's
-   * backup panel uses.
+   * copy first, drained a page at a time through `api.backup.sourcePage` (with
+   * any Builder fixes merged in), and the copy shipped beside this page when
+   * the database will not answer — the same fallback the Control Room's backup
+   * panel uses.
    */
   const getSource = async (): Promise<SourceResult> => {
     try {
-      return (await convex.query(api.backup.source, {})) as SourceResult;
+      return await readSource(convex);
     } catch {
-      const bundled = await import("@/convex/self_source");
-      return {
-        at: bundled.SELF_SNAPSHOT_AT,
-        files: bundled.SELF_SOURCE as SourceMap,
-        patched: [],
-      };
+      return readShippedSource();
     }
   };
 
@@ -350,7 +429,7 @@ function OfflineBrain() {
 
   const copyAddress = async () => {
     try {
-      await navigator.clipboard.writeText(address);
+      await navigator.clipboard.writeText(pageAddress);
       setCopied(true);
       toast.success("Address copied — open it in a normal tab so downloads work.");
     } catch {
@@ -372,7 +451,8 @@ function OfflineBrain() {
         if (text === null) missing.push(path);
         else files.push({ path, text });
       }
-      // The reference source archive is not text, so it goes in as its bytes.
+      // The two source archives are not text, so they go in as their bytes:
+      // the Freebuff reference implementation, and this app itself.
       for (const path of PACKAGE_BINARY_FILES) {
         const bytes = await fetchPackagedBytes(path);
         if (bytes === null) missing.push(path);
@@ -401,7 +481,7 @@ function OfflineBrain() {
         const note = missing.length ? ` (${missing.length} files unavailable)` : "";
         const carried = files.length + archives.length;
         toast.success(
-          `${FULL_PACKAGE}: ${carried} files — including the Freebuff source archive — ${chosenSet.label} set (${chosenSet.size})${note}. Put it on the drive and run it there.`,
+          `${FULL_PACKAGE}: ${carried} files — both source archives included, this app itself and the Freebuff reference — ${chosenSet.label} set (${chosenSet.size})${note}. Put it on the drive and run it there.`,
           { id: toastId, duration: 9000 },
         );
       } else {
@@ -441,8 +521,9 @@ function OfflineBrain() {
 
   /**
    * The packaged files that are not text: the archive of the Freebuff reference
-   * source. Fetched as bytes, so an edition that carries the package carries all
-   * of it and nothing has to be downloaded while it installs.
+   * source and the archive of this app's own source. Fetched as bytes, so an
+   * edition that carries the package carries all of it — the application
+   * included — and nothing has to be downloaded while it installs.
    */
   const buildBrainArchive = async (): Promise<Record<string, Uint8Array>> => {
     const archives: Record<string, Uint8Array> = {};
@@ -490,7 +571,7 @@ function OfflineBrain() {
       );
       if (saved) {
         toast.success(
-          `Web edition saved: the whole app (${Object.keys(snapshot.files).length} files) with its Docker kit, the PWA shell and the offline brain package — the Freebuff source archive included. Run it with docker compose up --build.`,
+          `Web edition saved: the whole app (${Object.keys(snapshot.files).length} files) with its Docker kit, the PWA shell and the offline brain package — both source archives included, and this app again inside the package as source/this-app-source.zip. Run it with docker compose up --build.`,
           { id: toastId, duration: 9000 },
         );
       }
@@ -515,7 +596,7 @@ function OfflineBrain() {
       const saved = await writeBlob(blob, `offline-ai-coding-brain-${stampOf(new Date().toISOString())}.zip`, toastId);
       if (saved) {
         toast.success(
-          `Local edition saved: ${fetched} files — the Python brain, every installer and the Freebuff source archive${missing.length ? ` (${missing.length} unavailable, named in START-HERE.md)` : ""}. Unzip it and run GET-EVERYTHING.sh; nothing in it is fetched.`,
+          `Local edition saved: ${fetched} files — the Python brain, every installer and both source archives, this app's own among them${missing.length ? ` (${missing.length} unavailable, named in START-HERE.md)` : ""}. Unzip it and run GET-EVERYTHING.sh; nothing in it is fetched.`,
           { id: toastId, duration: 9000 },
         );
       }
@@ -554,7 +635,7 @@ function OfflineBrain() {
       const saved = await writeBlob(blob, `private-hub-everything-${stamp}.zip`, toastId);
       if (saved) {
         toast.success(
-          `Everything saved: the app (${Object.keys(snapshot.files).length} files)${exportData ? ", the data" : ""}, and the offline brain package (${Object.keys(brainFiles).length + Object.keys(brainArchive).length} files, the Freebuff source archive included) in one zip.`,
+          `Everything saved: the app (${Object.keys(snapshot.files).length} files)${exportData ? ", the data" : ""}, and the offline brain package (${Object.keys(brainFiles).length + Object.keys(brainArchive).length} files, both source archives included) in one zip.`,
           { id: toastId, duration: 9000 },
         );
       }
@@ -658,6 +739,7 @@ function OfflineBrain() {
           at,
           address,
           (path) => fetchPackagedBytes(path),
+          measure?.sizes ?? {},
         );
       // A category with no installer of its own is only its files, so if not
       // one of them could be read there is nothing worth saving. A category
@@ -682,7 +764,7 @@ function OfflineBrain() {
         : "";
       toast.success(
         `Everything in “${group.title}”: ${files} files in one zip${
-          archives.length ? ", the Freebuff source archive included" : ""
+          archives.length ? ", both source archives included" : ""
         }${note}. ${
           installer
             ? `Unzip it and run ${installer}.`
@@ -723,11 +805,73 @@ function OfflineBrain() {
           <p className="text-[10px] text-muted-foreground">
             Your VPN link, the hub's own backup, and the whole offline AI coding
             system — with a complete download for each platform (Windows, macOS,
-            ChromeOS, Linux, Android, iPhone and the open-source build), and
-            every model, agent and tool listed below.
+            ChromeOS, Linux, Android, iPhone and the open-source build), every
+            model, agent and tool listed below, and the hub's own app baked into
+            all of it, so a download is the application as well as the tools.
           </p>
         </div>
       </motion.header>
+
+      {/* ------------------------------------------- what this hub is serving */}
+      <motion.section
+        {...RISE}
+        transition={{ duration: 0.25, delay: 0.01 }}
+        className="mb-3 flex flex-wrap items-start gap-3 rounded-2xl border border-white/25 bg-card/70 px-4 py-3 backdrop-blur-sm"
+      >
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-white/10 text-white">
+          <Archive className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-[11px] font-semibold tracking-tight">
+            What this hub is serving, measured now
+          </h2>
+          <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
+            {measure ? (
+              <>
+                {measure.files} of {PACKAGE_ALL_FILES.length} files answered ·{" "}
+                <span className="text-foreground">
+                  {readableSize(measure.bytes)}
+                </span>{" "}
+                · measured at {measuredAt}. Every size below is that measurement —
+                each file is asked for and its size read off the answer, which
+                costs a few bytes, not a download — so the figures move the
+                moment a file does. Nothing here is a number remembered from the
+                day it was typed.
+              </>
+            ) : (
+              "Asking the hub for every file it serves, so the sizes below are measured rather than remembered…"
+            )}
+            {measure && measure.missing.length ? (
+              <>
+                {" "}
+                <span className="text-foreground">
+                  {measure.missing.length} file{measure.missing.length === 1 ? "" : "s"}{" "}
+                  not answered
+                </span>
+                {" — "}
+                {measure.missing.slice(0, 3).join(", ")}
+                {measure.missing.length > 3 ? " …" : ""}. Nothing missing is
+                ever counted in a total, and a download says so in its README.
+              </>
+            ) : null}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={measuring}
+          onClick={() => void measureNow()}
+          title="Ask the hub for every packaged file again and print the sizes it answers with"
+          className="h-8 shrink-0 cursor-pointer rounded-lg text-[10px]"
+        >
+          {measuring ? (
+            <Loader2 className="size-3 animate-spin" />
+          ) : (
+            <Ruler className="size-3" />
+          )}
+          Measure again
+        </Button>
+      </motion.section>
 
       {/* ---------------------------------------------------------- proton vpn */}
       <motion.section
@@ -807,10 +951,12 @@ function OfflineBrain() {
             <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
               One file,{" "}
               <span className="text-foreground">
-                {FULL_PACKAGE} · {FULL_PACKAGE_SIZE}
+                {FULL_PACKAGE} · {installerLabel}
               </span>
-              . It carries the whole package ({PACKAGE_ALL_FILES.length} files,
-              the Freebuff source archive included),
+              {installerSize !== null ? " (measured)" : ""}
+              . It carries the whole package ({PACKAGE_ALL_FILES.length} files —
+              this app's own source, whole, and the Freebuff reference source
+              beside it),
               installs every prerequisite it needs, then installs the software
               and downloads the models. You pick the model set below; that is how
               much it then puts onto the drive.
@@ -860,8 +1006,15 @@ function OfflineBrain() {
             dialog.
           </p>
           <div className="flex shrink-0 items-center gap-2">
-            <span className="rounded-full border border-border/60 px-2 py-1 text-[9px] tabular-nums text-muted-foreground">
-              {FULL_PACKAGE_SIZE} + {chosenSet.size}
+            <span
+              className="rounded-full border border-border/60 px-2 py-1 text-[9px] tabular-nums text-muted-foreground"
+              title={
+                installerSize !== null
+                  ? "The installer is this hub's package as one script, measured just now"
+                  : undefined
+              }
+            >
+              {installerLabel} + {chosenSet.size}
             </span>
             <Button
               type="button"
@@ -919,9 +1072,9 @@ function OfflineBrain() {
           The three editions — web, local, and both in one
         </h3>
         <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
-          Each edition is complete in itself. The web edition is the app; the
-          local edition is the brain and its tools; the everything edition is
-          both together, plus your data — the one to keep.
+          Each edition is complete in itself. The web edition is the app as it
+          now stands; the local edition is the brain and its tools; the
+          everything edition is both together, plus your data — the one to keep.
         </p>
         <div className="mt-2 grid gap-2 md:grid-cols-3">
           {EDITIONS.map((edition) => {
@@ -1051,7 +1204,25 @@ function OfflineBrain() {
           What everything weighs
         </h3>
         <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {SIZE_SUMMARY.map(({ label, value, note }) => (
+          {[
+            // The two figures that can be measured here are measured, not
+            // remembered: the package this hub is serving, and the one script
+            // built out of it. The rest are the weights and the installed
+            // software, which live on the machine and are the catalog's own.
+            {
+              label: "The package, as served",
+              value: measure ? readableSize(measure.bytes) : "measuring…",
+              note: measure
+                ? `${measure.files} files, measured from this hub at ${measuredAt} — the Python brain, every installer, the docs, this app's own source archive and the reference archive`
+                : "asking this hub for every file it serves",
+            },
+            {
+              label: "The installer file",
+              value: installerLabel,
+              note: "one script — the package and the archive inside it, and it fetches the software and weights",
+            },
+            ...SIZE_SUMMARY,
+          ].map(({ label, value, note }) => (
             <div
               key={label}
               className="rounded-xl border border-border/60 bg-background/30 px-3 py-2"
@@ -1082,8 +1253,8 @@ function OfflineBrain() {
             </h2>
             <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
               Pick the machine you are on. Every build is the whole package —
-              the Python brain and every installer — beside an installer written
-              in{" "}
+              the Python brain, every installer, this app's own source and the
+              Freebuff reference beside it — beside an installer written in{" "}
               <span className="text-foreground">
                 that platform's own language
               </span>
@@ -1212,8 +1383,10 @@ function OfflineBrain() {
             </h2>
             <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
               The hub's own downloads live here now, beside every other download:
-              the whole app ready to run with Docker, the code as one readable
-              file, and a JSON copy of everything the hub has written down.
+              the app as it now stands, ready to run with Docker, the code as one
+              readable file, and a JSON copy of everything the hub has written
+              down. Every one of them is built from the app's own current copy —
+              nothing older than the app can get into one.
             </p>
           </div>
         </div>
@@ -1235,7 +1408,7 @@ function OfflineBrain() {
 
         <div className="mt-2 flex items-center gap-2">
           <code className="min-w-0 flex-1 truncate rounded-lg border border-border/60 bg-background/40 px-2.5 py-2 text-[10px]">
-            {address}
+            {pageAddress}
           </code>
           <Button
             type="button"
@@ -1304,6 +1477,9 @@ function OfflineBrain() {
         {filtered.map((group, index) => {
           const Icon = ICONS[group.icon] ?? Package;
           const gFiles = groupFiles(group);
+          // What this category weighs, as this hub is serving it — nothing
+          // counted unless every file it names answered.
+          const gBytes = measuredBytes(measure, groupPackagedPaths(group));
           return (
             <motion.section
               key={group.id}
@@ -1326,9 +1502,14 @@ function OfflineBrain() {
                 <div className="flex shrink-0 items-center gap-2">
                   <span
                     className="rounded-full border border-border/60 px-2 py-1 text-[9px] tabular-nums text-muted-foreground"
-                    title={`Every file in this category — ${gFiles} in one zip`}
+                    title={`Every file in this category — ${gFiles} in one zip${
+                      gBytes !== null
+                        ? `, ${readableSize(gBytes)} of packaged files as this hub serves them`
+                        : ""
+                    }`}
                   >
                     {gFiles} files
+                    {gBytes !== null ? ` · ${readableSize(gBytes)}` : ""}
                   </span>
                   <Button
                     type="button"
@@ -1350,7 +1531,7 @@ function OfflineBrain() {
 
               <ul className="mt-3 divide-y divide-border/60">
                 {group.items.map((item) => {
-                  const size = displaySize(item);
+                  const size = displaySize(item, measure);
                   const busy = saving === item.name;
                   return (
                     <li
@@ -1389,8 +1570,17 @@ function OfflineBrain() {
                         </p>
                       </div>
 
-                      <span className="shrink-0 rounded-full border border-border/60 px-2 py-1 text-[9px] tabular-nums text-muted-foreground">
-                        {size}
+                      <span
+                        className="shrink-0 rounded-full border border-border/60 px-2 py-1 text-[9px] tabular-nums text-muted-foreground"
+                        title={
+                          size.measured
+                            ? "Measured from what this hub is serving, just now"
+                            : item.file
+                              ? "The hub did not answer for this file, so this is the catalog's figure"
+                              : undefined
+                        }
+                      >
+                        {size.text}
                       </span>
                       <Button
                         type="button"
@@ -1421,6 +1611,24 @@ function OfflineBrain() {
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * The same page, inside the Control Room.
+ *
+ * Nothing is re-drawn here: it is this exact component, with the identical
+ * state, downloads and live reads, framed as one full section of the merged
+ * Control Room instead of as a page. Its own address keeps opening it the way
+ * it always did — the Control Room is the new home, not the only one.
+ */
+export function OfflineBrainSection() {
+  return (
+    <section id="section-offline-brain" className="scroll-mt-2">
+      <div className="rounded-2xl border border-white/25 bg-card/70 p-1 backdrop-blur-sm">
+        <OfflineBrain />
+      </div>
+    </section>
   );
 }
 

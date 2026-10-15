@@ -12,10 +12,15 @@ machine. There are no cloud services, accounts, subscriptions or paid APIs.
 
 | Part | State |
 | --- | --- |
-| `source/freebuff-source.zip` | **Already in this download** — the complete Freebuff (Codebuff) TypeScript/Bun monorepo (Apache-2.0), 1,773 files. `scripts/capture-freebuff-source.sh` unpacks it to `source/freebuff/`; nothing is fetched for it. |
+| `source/freebuff-source.zip` | **Already in this download** — the complete Freebuff (Codebuff) TypeScript/Bun monorepo (Apache-2.0), 1,773 files, 18.9 MB (58.3 MB unpacked). `scripts/capture-freebuff-source.sh` unpacks it to `source/freebuff/`; nothing is fetched for it. |
+| `source/this-app-source.zip` | **Already in this download** — **the hub's own app**: every page and Convex function, the shell, the desktop browser, the native host, NOVA OS, the scripts and the docs, plus the two generated halves of its own snapshot so the copy builds as it stands. 437 files, 5.4 MB (19.9 MB unpacked). `scripts/capture-this-app.sh` unpacks it to `source/app/`; nothing is fetched for it. |
 | The brain, every installer script, the docs | Already in this download. |
 | The software — runtimes, tools, agents, frameworks, libraries | Installed by the scripts when you run them on your machine. |
 | Model weights | Fetched by `scripts/download-models.sh`; they are many GB and belong on your disk. |
+
+Nothing in `source/` is fetched on install: `scripts/capture-freebuff-source.sh`
+and `scripts/capture-this-app.sh` unpack the two archives that came with the
+download (`source/freebuff/` and `source/app/`).
 
 Unpacked from that archive, `source/freebuff/` is the reference implementation of
 the whole loop. The parts worth reading first:
@@ -33,6 +38,39 @@ source/freebuff/cli/               the CLI: agents, commands (router, reasoning,
 source/freebuff/common/src/tools/  tool definitions + params
 source/freebuff/docs/              agents-and-tools.md, testing.md
 ```
+
+### The app this is all part of
+
+The reference source is what the stack was modelled on; `source/this-app-source.zip`
+is the stack's own application, and it is in the package too. Unpack it with
+`scripts/capture-this-app.sh` and the whole hub is at `source/app/`: the web
+interface (the assistant, the AI builder that changes the app itself, the
+messenger with voice and video calls, the calendar, the Control Room), the
+Convex backend with every query, mutation and action behind those pages, the
+self-host kit, the desktop SUGAR browser, the native host and NOVA OS.
+
+```
+source/app/               the hub, as it stood when this package was built
+  src/                    the web app: pages, components, hooks, lib
+  src/convex/             the backend: schema, functions, the AI, the calls
+  public/                 what it serves: the PWA shell, this very package
+  self-hosting/           bun run own — the hub on this machine, no Docker
+  scripts/                its own checks: snapshot, verify, and one per feature
+  sugar-browser/          the desktop browser
+  native/  os/            the native host and NOVA OS
+  README.md  DEPLOY.md    what it is, and how to put it somewhere
+```
+
+It runs on Bun: `cd source/app && bun install && bun run own` brings up its own
+backend and database on the machine and serves it at `http://localhost:8080`,
+with nothing outside the computer involved. It is *readable* without any of
+that: the files are the same ones the hub serves as text in its Control Room.
+
+Two files in the archive are generated rather than copied —
+`src/convex/self_source.ts` and `public/self-source.json`, the snapshot the app
+keeps of itself — because that snapshot leaves itself out by design. They are
+written from the same tree, so the unpacked copy types, builds and serves
+without running anything first.
 
 ## Quick start
 
@@ -85,7 +123,8 @@ search/          lexical + vector search engines
 databases/       SQLite, Postgres+pgvector, DuckDB, Redis, Qdrant, Chroma, ...
 runtimes/        language runtimes (python, node, bun, deno, rust, go)
 libraries/       common python + node libraries
-source/          Freebuff/Codebuff source (downloaded)
+source/          the hub's own app, and the Freebuff/Codebuff reference source
+                 — both archives are already in this download
 documentation/   architecture, capability map, licenses, offline guide
 scripts/         installers, downloaders, verifier
 configuration/   catalog.json (capability -> component), env.sh

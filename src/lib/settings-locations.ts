@@ -482,9 +482,9 @@ export const SETTING_LOCATIONS: Record<string, SettingLocation> = {
   /* ---------------------------------------------------------------- calls */
   video_calls: {
     where:
-      "Here in this app. Calls go straight between your family's devices and use the Camera and Microphone permissions above.",
+      "Here in this app. Calls go between your family's devices — through your own media server when one is set, otherwise straight between them — and use the Camera, Microphone and Screen Recording permissions above.",
     quick:
-      "Get on from the Messenger. There is no switch anywhere else.",
+      "Get on from the Messenger — or ring somebody with the bell on their box: their hub rings and notifies them. The call then follows you across the hub in a box you can drag anywhere, and a shared screen opens in a portal of its own. There is no switch anywhere else.",
     routes: [],
   },
 };

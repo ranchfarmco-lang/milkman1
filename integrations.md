@@ -1,145 +1,72 @@
-# VLY Integrations
+# Integrations
 
-First-order integrations for AI, email, and payments with automatic usage billing through VLY integration keys.
+This project needs **none** to run. This file says what the optional piece is
+called, what it costs, and where the app's own equivalent lives — so nobody
+reaches for it thinking the hub depends on it.
 
-## Environment Variables
+## The optional package: `@vly-ai/integrations`
 
-The following environment variables are automatically set during project creation:
+It is Freebuff's own gateway to AI, email and payments (VLY integration keys,
+`sk_*`). It sits in `package.json` as an **optional dependency**, and the only
+things that name it are inside a `try`:
 
-- `VLY_INTEGRATION_KEY`: Your unique integration key (format: `sk_*`)
-- `VLY_INTEGRATION_BASE_URL`: The base URL for the integration gateway (default: `https://integrations.vly.ai/`)
+- `vite.config.ts` — the Freebuff build plugin, which matters only while this
+  project is being edited inside Freebuff;
+- `src/lib/vly-integrations.ts` — `loadVlyIntegrations()`, which nothing calls.
 
-## Installation
+Nothing in the app imports either at load time, and that is deliberate: a copy of
+this project on a machine that has never heard of Freebuff has to build and run
+all the same. `bun tsc -b --noEmit` and Vite both pass with the package absent
+from `node_modules` entirely (verified), and `src/vite-optional.d.ts` is what
+keeps the type-checker agreeing.
 
-The `@vly-ai/integrations` package is already included in package.json.
+**It is not free, and not needed.** The gateway is metered: *"all API calls are
+automatically billed to your deployment based on usage"*, and the key is injected
+during project creation on the Freebuff side. So it is the opposite of the way
+this hub is built — see below.
 
-**Alternative AI Providers:** While you can use OpenAI, OpenRouter, or other AI providers directly with your own API keys, @vly-ai/integrations is simpler as it works out-of-the-box without requiring you to supply and manage API keys.
+## What this hub uses instead
 
-## Usage in Convex Actions
+Bring your own key, or run a model on your own machine; both are free of any
+gateway and any billing, and neither needs a Freebuff variable:
+
+| Need | Where it lives |
+| --- | --- |
+| The hub's AI boxes, with your own key | `src/components/forge/ByokBox.tsx`, `src/lib/forge/llm.ts` |
+| An AI on this machine, no key at all | the **Local Brain** page (`src/pages/LocalBrain.tsx`) |
+| The builder crew | `src/lib/forge/agent.ts`, `src/components/BuilderCrewPanel.tsx` |
+| Email sign-in codes | `src/convex/auth/emailOtp.ts`, and only when a key is provided — `src/convex/auth.ts` |
+
+Sign-in does not need any of it either: the hub signs devices in anonymously and
+identifies them by the device rule (`src/convex/device_rule.ts`). See
+`self-hosting/README.md` for the account-free way to run the whole thing.
+
+## If you do want the gateway
+
+Call the lazy loader where you use it, rather than importing the package at the
+top of a module — that is the one rule that keeps it optional:
 
 ```typescript
 "use node";
 
-import { vly } from '../lib/vly-integrations';
 import { action } from "./_generated/server";
+import { loadVlyIntegrations } from "../lib/vly-integrations";
 
-export const generateAIResponse = action({
-handler: async (ctx, args) => {
-  // AI Completions
-  const completion = await vly.ai.completion({
-    model: 'gpt-4o-mini',
-    messages: [
-      { role: 'system', content: 'You are a helpful assistant.' },
-      { role: 'user', content: 'Hello!' }
-    ],
-    temperature: 0.7,
-    maxTokens: 150
-  });
+export const generate = action({
+  handler: async () => {
+    const vly = await loadVlyIntegrations();
 
-  return completion;
-}
+    // Not installed, or no VITE_VLY_INTEGRATION_KEY in this deployment: this is
+    // a normal state, not an error. Fall back to your own key or a local model.
+    if (!vly) return { ok: false, reason: "no integration" };
+
+    return await vly.ai.completion({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: "Hello!" }],
+    });
+  },
 });
 ```
 
-## Available Features
-
-### AI Integration
-```typescript
-// Create completion
-const completion = await vly.ai.completion({
-model: 'gpt-4o-mini', // or 'gpt-4o', 'claude-3-haiku', etc.
-messages: [...],
-temperature: 0.7,
-maxTokens: 150
-});
-
-// Stream completion
-await vly.ai.streamCompletion(
-request,
-(chunk: string) => console.log(chunk)
-);
-
-// Generate embeddings
-const embeddings = await vly.ai.embeddings("Your text here");
-```
-
-### Email Integration
-```typescript
-// Send email
-const emailResult = await vly.email.send({
-to: 'user@example.com',
-subject: 'Welcome!',
-html: '<h1>Welcome to our service!</h1>',
-text: 'Welcome to our service!'
-});
-
-// Send batch emails
-const batchResult = await vly.email.sendBatch([...emails]);
-```
-
-### Payments Integration
-```typescript
-// Create payment intent
-const paymentIntent = await vly.payments.createPaymentIntent({
-amount: 2000, // $20.00 in cents
-currency: 'usd',
-description: 'Premium subscription',
-customer: {
-  email: 'customer@example.com'
-}
-});
-
-// Create subscription
-const subscription = await vly.payments.createSubscription({...});
-
-// Create checkout session
-const session = await vly.payments.createCheckoutSession({...});
-```
-
-## Error Handling
-
-All methods return an ApiResponse object:
-
-```typescript
-interface ApiResponse<T> {
-success: boolean;
-data?: T;
-error?: string;
-usage?: {
-  credits: number;
-  operation: string;
-};
-}
-```
-
-Example error handling:
-
-```typescript
-const result = await vly.ai.completion({ ... });
-
-if (result.success) {
-console.log('Response:', result.data);
-console.log('Credits used:', result.usage?.credits);
-} else {
-console.error('Error:', result.error);
-}
-```
-
-## Important Notes
-
-1. The integration key (`VLY_INTEGRATION_KEY`) is automatically injected during project creation
-2. All API calls are automatically billed to your deployment based on usage
-3. Must be used in Convex actions with `"use node"` directive
-4. The integration key should never be exposed to the client
-5. **Alternative AI providers:** While you can use OpenAI, OpenRouter, or other AI providers directly with your own API keys, @vly-ai/integrations is simpler as it works out-of-the-box without requiring you to supply and manage API keys
-
-## Checking Integration Status
-
-To verify the integration is properly configured:
-
-```typescript
-const hasIntegration = !!process.env.VLY_INTEGRATION_KEY;
-if (!hasIntegration) {
-console.error("VLY integration key not found");
-}
-```
+Keep it inside a Convex action with the `"use node"` directive: the key is a
+server-side secret and must never reach the browser.

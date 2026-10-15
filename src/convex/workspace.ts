@@ -18,9 +18,33 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import { internalMutation, internalQuery, query } from "./_generated/server";
+import {
+  action,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+  type MutationCtx,
+  type QueryCtx,
+} from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
 import { isUnlocked } from "./guard";
 import { SELF_SOURCE } from "./self_source";
+
+/**
+ * The owner behind a public call into this bench, or null.
+ *
+ * Every public read and write below goes through this: signed in, and the hub
+ * unlocked, the same bar every private surface of the hub holds to. The bench
+ * is one person's own — the id never comes in from the page, it is worked out
+ * here, so a page can only ever touch its own files.
+ */
+async function benchOwner(ctx: QueryCtx | MutationCtx) {
+  const userId = await getAuthUserId(ctx);
+  if (userId === null) return null;
+  if (!(await isUnlocked(ctx))) return null;
+  return userId;
+}
 
 /** The ceiling on one file, and on the whole bench. */
 const MAX_FILE_CHARS = 200_000;
@@ -50,66 +74,68 @@ export function cleanPath(raw: string) {
 }
 
 /** Every file on the bench, smallest first — the shape of the project. */
+async function listFor(ctx: QueryCtx, ownerId: Id<"users">) {
+  const rows = await ctx.db
+    .query("files")
+    .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
+    .collect();
+
+  const files = rows
+    .map((row) => ({
+      path: row.path,
+      language: row.language ?? null,
+      chars: row.content.length,
+      updatedAt: row.updatedAt,
+    }))
+    .sort((a, b) => a.path.localeCompare(b.path));
+
+  return {
+    files,
+    totalChars: files.reduce((sum, file) => sum + file.chars, 0),
+  };
+}
+
 export const list = internalQuery({
   args: { ownerId: v.id("users") },
-  handler: async (ctx, { ownerId }) => {
-    const rows = await ctx.db
-      .query("files")
-      .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
-      .collect();
-
-    const files = rows
-      .map((row) => ({
-        path: row.path,
-        language: row.language ?? null,
-        chars: row.content.length,
-        updatedAt: row.updatedAt,
-      }))
-      .sort((a, b) => a.path.localeCompare(b.path));
-
-    return {
-      files,
-      totalChars: files.reduce((sum, file) => sum + file.chars, 0),
-    };
-  },
+  handler: async (ctx, { ownerId }) => await listFor(ctx, ownerId),
 });
 
 /** One file in full, or nothing if it was never written. */
+async function readFor(ctx: QueryCtx, ownerId: Id<"users">, path: string) {
+  const clean = cleanPath(path);
+  if (!clean) return null;
+
+  const row = await ctx.db
+    .query("files")
+    .withIndex("by_owner", (q) => q.eq("ownerId", ownerId).eq("path", clean))
+    .unique();
+
+  if (!row) return null;
+
+  return {
+    path: row.path,
+    content: row.content,
+    language: row.language ?? null,
+    updatedAt: row.updatedAt,
+  };
+}
+
 export const read = internalQuery({
   args: { ownerId: v.id("users"), path: v.string() },
-  handler: async (ctx, { ownerId, path }) => {
-    const clean = cleanPath(path);
-    if (!clean) return null;
-
-    const row = await ctx.db
-      .query("files")
-      .withIndex("by_owner", (q) => q.eq("ownerId", ownerId).eq("path", clean))
-      .unique();
-
-    if (!row) return null;
-
-    return {
-      path: row.path,
-      content: row.content,
-      language: row.language ?? null,
-      updatedAt: row.updatedAt,
-    };
-  },
+  handler: async (ctx, { ownerId, path }) => await readFor(ctx, ownerId, path),
 });
 
 /** Write a file, or overwrite one that is already there. */
-export const write = internalMutation({
-  args: {
-    ownerId: v.id("users"),
-    path: v.string(),
-    content: v.string(),
-    language: v.optional(v.string()),
-  },
-  handler: async (ctx, { ownerId, path, content, language }) => {
-    const clean = cleanPath(path);
-    if (!clean) {
-      return { ok: false as const, reason: "That is not a usable file path." };
-    }
+async function writeFor(
+  ctx: MutationCtx,
+  ownerId: Id<"users">,
+  args: { path: string; content: string; language?: string },
+) {
+  const { path, content, language } = args;
+  const clean = cleanPath(path);
+  if (!clean) {
+    return { ok: false as const, reason: "That is not a usable file path." };
+  }
 
     const body = content.slice(0, MAX_FILE_CHARS);
     const truncated = content.length > MAX_FILE_CHARS;
@@ -172,49 +198,64 @@ export const write = internalMutation({
       content: body,
     });
 
-    return {
-      ok: true as const,
-      path: clean,
-      chars: body.length,
-      created: true,
-      truncated,
-    };
+  return {
+    ok: true as const,
+    path: clean,
+    chars: body.length,
+    created: true,
+    truncated,
+  };
+}
+
+export const write = internalMutation({
+  args: {
+    ownerId: v.id("users"),
+    path: v.string(),
+    content: v.string(),
+    language: v.optional(v.string()),
   },
+  handler: async (ctx, { ownerId, ...rest }) =>
+    await writeFor(ctx, ownerId, rest),
 });
 
 /** Take a file off the bench. */
+async function removeFor(ctx: MutationCtx, ownerId: Id<"users">, path: string) {
+  const clean = cleanPath(path);
+
+  const row = await ctx.db
+    .query("files")
+    .withIndex("by_owner", (q) => q.eq("ownerId", ownerId).eq("path", clean))
+    .unique();
+
+  if (!row) {
+    return { ok: false as const, reason: `There is no ${clean} on the bench.` };
+  }
+
+  await ctx.db.delete(row._id);
+  await ctx.scheduler.runAfter(0, internal.sandbox.mirror, { path: clean });
+  return { ok: true as const, path: clean };
+}
+
 export const remove = internalMutation({
   args: { ownerId: v.id("users"), path: v.string() },
-  handler: async (ctx, { ownerId, path }) => {
-    const clean = cleanPath(path);
-
-    const row = await ctx.db
-      .query("files")
-      .withIndex("by_owner", (q) => q.eq("ownerId", ownerId).eq("path", clean))
-      .unique();
-
-    if (!row) {
-      return { ok: false as const, reason: `There is no ${clean} on the bench.` };
-    }
-
-    await ctx.db.delete(row._id);
-    await ctx.scheduler.runAfter(0, internal.sandbox.mirror, { path: clean });
-    return { ok: true as const, path: clean };
-  },
+  handler: async (ctx, { ownerId, path }) =>
+    await removeFor(ctx, ownerId, path),
 });
 
 /** Empty the bench. Used when the builder wants a clean slate. */
+async function clearFor(ctx: MutationCtx, ownerId: Id<"users">) {
+  const rows = await ctx.db
+    .query("files")
+    .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
+    .collect();
+
+  for (const row of rows) await ctx.db.delete(row._id);
+  return { removed: rows.length };
+}
+
 export const clear = internalMutation({
   args: { ownerId: v.id("users") },
-  handler: async (ctx, { ownerId }) => {
-    const rows = await ctx.db
-      .query("files")
-      .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
-      .collect();
-
-    for (const row of rows) await ctx.db.delete(row._id);
-    return { removed: rows.length };
-  },
+  handler: async (ctx, { ownerId }) => await clearFor(ctx, ownerId),
 });
 
 /**
@@ -553,5 +594,127 @@ export const search = internalQuery({
     }
 
     return { matches, truncated, scanned };
+  },
+});
+
+/* ---------------------------------------------------- the page's own hands */
+
+/**
+ * The same bench, reached from a page instead of from a turn.
+ *
+ * The builder's middle panel — the file tree and the editor — is a person
+ * reading and overriding what the builder wrote, and what the builder wrote is
+ * theirs: so these are the internal calls above with the owner worked out on
+ * the server rather than handed in. Nothing here is a second implementation;
+ * the shapes are identical, and the panel and the tool loop share one bench.
+ */
+
+/** Every file on the bench, for the tree. */
+export const listOwn = query({
+  args: {},
+  handler: async (ctx) => {
+    const ownerId = await benchOwner(ctx);
+    if (!ownerId) return null;
+    return await listFor(ctx, ownerId);
+  },
+});
+
+/** One file in full, for the editor — or nothing when it was never written. */
+export const readOwn = query({
+  args: { path: v.string() },
+  handler: async (ctx, { path }) => {
+    const ownerId = await benchOwner(ctx);
+    if (!ownerId) return null;
+    return await readFor(ctx, ownerId, path);
+  },
+});
+
+/** Save an edit from the editor — manual overrides, same rules as the tool. */
+export const writeOwn = mutation({
+  args: {
+    path: v.string(),
+    content: v.string(),
+    language: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const ownerId = await benchOwner(ctx);
+    if (!ownerId) {
+      return { ok: false as const, reason: "Sign in and unlock the hub first." };
+    }
+    return await writeFor(ctx, ownerId, args);
+  },
+});
+
+/** Take one file off from the tree. */
+export const removeOwn = mutation({
+  args: { path: v.string() },
+  handler: async (ctx, { path }) => {
+    const ownerId = await benchOwner(ctx);
+    if (!ownerId) {
+      return { ok: false as const, reason: "Sign in and unlock the hub first." };
+    }
+    return await removeFor(ctx, ownerId, path);
+  },
+});
+
+/**
+ * Empty the whole bench — the reset control in the Control Room. The count of
+ * what went comes back so the confirmation can say a real number.
+ */
+export const clearOwn = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const ownerId = await benchOwner(ctx);
+    if (!ownerId) return { removed: 0 };
+    return await clearFor(ctx, ownerId);
+  },
+});
+
+/**
+ * Every file with its full content — what an export reads.
+ *
+ * Internal because it is only ever reached through `exportNow` below: the
+ * whole bench in one hand is exactly the shape a download wants, and exactly
+ * the shape a page should never be subscribed to. An action is asked once, on
+ * a button press, and the bytes go nowhere but the browser that asked.
+ */
+export const dump = internalQuery({
+  args: { ownerId: v.id("users") },
+  handler: async (ctx, { ownerId }) => {
+    const rows = await ctx.db
+      .query("files")
+      .withIndex("by_owner", (q) => q.eq("ownerId", ownerId))
+      .collect();
+
+    return {
+      files: rows
+        .map((row) => ({ path: row.path, content: row.content }))
+        .sort((a, b) => a.path.localeCompare(b.path)),
+      at: Date.now(),
+    };
+  },
+});
+
+/**
+ * The whole bench, once, for the page's Export-as-ZIP button.
+ *
+ * An action rather than a query on purpose: a query is a subscription, and a
+ * subscription to every byte of the project would re-send all of it every
+ * time the builder wrote a line. This is asked when a person presses the
+ * button, answered once, and the bytes stay in the browser that asked — the
+ * file they save is made there, from this, and nothing is uploaded anywhere.
+ */
+export const exportNow = action({
+  args: {},
+  handler: async (
+    ctx,
+  ): Promise<{
+    files: { path: string; content: string }[];
+    at: number;
+  } | null> => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return null;
+    if (!(await ctx.runQuery(internal.access.unlocked, {}))) return null;
+    return await ctx.runQuery(internal.workspace.dump, { ownerId: userId });
   },
 });

@@ -7,10 +7,10 @@
  *
  * The text payload is written with here-documents rather than base64, because
  * nearly every packaged file is text. That keeps the script readable and needs
- * no `unzip`, no `base64`, and no Python to unpack it — just bash. The two
- * exceptions are written as base64 instead: the archive of the reference
- * source, which ships inside the package as real bytes (see
- * `PACKAGE_BINARY_FILES`), and anything else that is ever added there.
+ * no `unzip`, no `base64`, and no Python to unpack it — just bash. The files
+ * that are not text are written as base64 instead: the two archives that ship
+ * inside the package as real bytes (see `PACKAGE_BINARY_FILES`) — the Freebuff
+ * reference source, and this app's own source, whole.
  */
 
 export type BundleFile = { path: string; text: string };
@@ -203,7 +203,13 @@ export function buildSelfInstaller(
     'chmod +x GET-EVERYTHING.sh scripts/*.sh tests/*.sh 2>/dev/null || true',
     "",
     'echo "Package unpacked into: $DEST"',
-    `echo "Unpacked ${usable.length} files${usableBinary.length ? ` and ${usableBinary.length} archive` : ""}."`,
+    `echo "Unpacked ${usable.length} files${
+      usableBinary.length === 0
+        ? ""
+        : usableBinary.length === 1
+          ? ` and 1 archive`
+          : ` and ${usableBinary.length} archives`
+    }."`,
     "",
     "if [ ! -x ./GET-EVERYTHING.sh ]; then",
     '  echo "GET-EVERYTHING.sh is missing or not executable — unpacking failed." >&2',

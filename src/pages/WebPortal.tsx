@@ -4,8 +4,12 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import { SugarPortal } from "@/components/SugarPortal";
 import { Button } from "@/components/ui/button";
 import { useInstall } from "@/hooks/use-install";
+import { AssistantIcon } from "@/lib/assistant-mark";
+import { useHubAddress } from "@/lib/hub-address";
+import { copyText } from "@/lib/internal-share";
 import type { InstallGuide } from "@/lib/pwa";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -14,7 +18,6 @@ import {
   BrainCircuit,
   CalendarDays,
   Check,
-  Church,
   Copy,
   Download,
   Globe,
@@ -41,7 +44,7 @@ const PAGES = [
   {
     to: "/assistant",
     label: "AI Assistant",
-    icon: Church,
+    icon: AssistantIcon,
     line: "Ask it anything, or just talk. It looks things up, runs code, sets timers, passes messages on, reads the [LIVE] board back to you, gives you a rundown of the day and everything coming up, and speaks up on its own when a timer or reminder needs you.",
   },
   {
@@ -66,7 +69,7 @@ const PAGES = [
     to: "/control-room",
     label: "Control Room",
     icon: SlidersHorizontal,
-    line: "All the settings, and only the settings: the switches the hub owns, a note on where each one really lives, the AI systems answering you, what the assistant remembers, the voice it speaks with, and the calendar's reminders and feeds.",
+    line: "Everything, in one place: the live system status, the switches the hub owns (and where each one really lives), the AI systems answering you, what the assistant remembers, the voice it speaks with, the calendar's reminders and feeds — and this Web Portal and the Offline Brain, which are sections of it now rather than pages of their own.",
   },
   {
     to: "/live",
@@ -144,7 +147,7 @@ const CONTROLS = [
       },
       {
         label: "From the board, daily",
-        what: "Every morning the [LIVE] board writes itself onto the Assistant & LIVE layer: the dated horse and equipment sales as all-day entries, one \"Colorado & national watch\" card for the day's weather alerts, road reports, drought and hay trade, and a reminder for each person. A sale that has passed is cleared away on its own.",
+        what: 'Every morning the [LIVE] board writes itself onto the Assistant & LIVE layer: the dated horse and equipment sales as all-day entries, one "Colorado & national watch" card for the day\'s weather alerts, road reports, drought and hay trade, and a reminder for each person. A sale that has passed is cleared away on its own.',
       },
       {
         label: "Shopping list",
@@ -162,11 +165,11 @@ const CONTROLS = [
       },
       {
         label: "Read the [LIVE] board",
-        what: "Say \"what's on the live board\" and the assistant reads it back — the weather, snow, alerts, drought, fire, the markets, hay and cattle prices, the auctions, aircraft overhead, space weather and the headlines, with every link it names.",
+        what: 'Say "what\'s on the live board" and the assistant reads it back — the weather, snow, alerts, drought, fire, the markets, hay and cattle prices, the auctions, aircraft overhead, space weather and the headlines, with every link it names.',
       },
       {
         label: "Rundown",
-        what: "Say \"brief me\" or \"what's coming up\" and the assistant reads the calendar and the board together: today first, then everything on the way.",
+        what: 'Say "brief me" or "what\'s coming up" and the assistant reads the calendar and the board together: today first, then everything on the way.',
       },
       {
         label: "Keys",
@@ -296,7 +299,11 @@ function GuideList({
       className="mt-2"
     >
       {guides.map((guide) => (
-        <AccordionItem key={guide.id} value={guide.id} className="border-border/60">
+        <AccordionItem
+          key={guide.id}
+          value={guide.id}
+          className="border-border/60"
+        >
           <AccordionTrigger className="cursor-pointer py-2.5 hover:no-underline">
             <span className="min-w-0">
               <span className="flex flex-wrap items-center gap-1.5">
@@ -343,13 +350,11 @@ function GuideList({
   );
 }
 
-function WebPortal() {
+export function WebPortal() {
   const { info, guides, ownGuide, canInstall, installed, busy, install } =
     useInstall();
   const [copied, setCopied] = useState(false);
-
-  const address =
-    typeof window === "undefined" ? "" : `${window.location.origin}/`;
+  const address = useHubAddress();
 
   const deviceWord =
     info.kind === "computer"
@@ -368,12 +373,18 @@ function WebPortal() {
   };
 
   const copyAddress = async () => {
-    try {
-      await navigator.clipboard.writeText(address);
+    // `copyText` falls back to the old textarea trick, so this works inside a
+    // preview frame and on an insecure address too, where `navigator.clipboard`
+    // is simply not allowed and would otherwise fail silently.
+    if (await copyText(address)) {
       setCopied(true);
-      toast.success("Address copied — send it to the next device.");
-    } catch {
-      toast.error("This browser would not let me copy it — select and copy it yourself.");
+      toast.success(
+        "Address copied — paste it into a message or another device.",
+      );
+    } else {
+      toast.error(
+        "This browser would not let me copy it — select the address and copy it yourself.",
+      );
     }
   };
 
@@ -392,11 +403,17 @@ function WebPortal() {
             Web Portal
           </h1>
           <p className="text-[10px] text-muted-foreground">
-            One address, opened in any browser. Put it on your device, and what
-            every button does.
+            The hub's control surface for the server, the network and the VPN —
+            live diagnostics, the real HTTP API, the download centre and the
+            remote-access hub — plus one address to open on anything.
           </p>
         </div>
       </motion.header>
+
+      {/* ------------------------------------------------------------ SUGAR */}
+      {/* The built-in server, browser and Internet connectivity plan, with its
+          real diagnostics and downloads — the first thing on the portal. */}
+      <SugarPortal />
 
       {/* -------------------------------------------------- the address first */}
       <motion.section
@@ -409,9 +426,19 @@ function WebPortal() {
         </h3>
 
         <div className="mt-2 flex items-center gap-2">
-          <code className="min-w-0 flex-1 truncate rounded-lg border border-border/60 bg-background/40 px-2.5 py-2 text-[10px]">
-            {address}
-          </code>
+          {/* A plain, selectable field rather than a label: tapping it selects
+              the whole address, so it can be copied by hand anywhere the
+              clipboard is blocked. */}
+          <input
+            readOnly
+            value={address}
+            aria-label="The hub's address"
+            data-spell="off"
+            spellCheck={false}
+            onFocus={(event) => event.currentTarget.select()}
+            onClick={(event) => event.currentTarget.select()}
+            className="min-w-0 flex-1 truncate rounded-lg border border-border/60 bg-background/40 px-2.5 py-2 text-[10px] outline-none focus:border-white/40"
+          />
           <Button
             type="button"
             variant="outline"
@@ -428,9 +455,9 @@ function WebPortal() {
         </div>
 
         <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
-          Open that address on any phone or computer, sign in once, and it is the
-          same hub. Nothing to download, and nothing to send anyone but this
-          link.
+          Tap the address to select all of it, or press Copy to put it on the
+          clipboard and paste it wherever you like. Open it on any phone or
+          computer, sign in once, and it is the same hub.
         </p>
       </motion.section>
 
@@ -504,8 +531,8 @@ function WebPortal() {
                 On a computer
               </h2>
               <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
-                Windows, Mac, Linux or a Chromebook. It installs from the browser
-                you already have — no store, no installer file.
+                Windows, Mac, Linux or a Chromebook. It installs from the
+                browser you already have — no store, no installer file.
               </p>
             </div>
           </div>
@@ -609,6 +636,24 @@ function WebPortal() {
         </div>
       </motion.section>
     </div>
+  );
+}
+
+/**
+ * The same page, inside the Control Room.
+ *
+ * The Web Portal keeps its own address — it is the one surface that has to open
+ * on a brand-new device and while the database is down — and the Control Room
+ * now carries it as one full section, live server report and all, so the hub's
+ * control surface is reachable from the hub as well as from its own link.
+ */
+export function WebPortalSection() {
+  return (
+    <section id="section-web-portal" className="scroll-mt-2">
+      <div className="rounded-2xl border border-white/25 bg-card/70 p-1 backdrop-blur-sm">
+        <WebPortal />
+      </div>
+    </section>
   );
 }
 

@@ -1,4 +1,13 @@
-import { vlyPlugin } from "@vly-ai/integrations";
+// The line below is the one the Freebuff editor expects to find here, and it is
+// kept spelled out exactly as it wrote it — but commented, and the plugin is
+// loaded by `loadVlyPlugin()` further down instead. A top-level `import` of an
+// optional package is the difference between this app running on a machine
+// without it and Vite refusing to start at all, so it must not be live. Put it
+// back only together with a `node_modules` that is guaranteed to contain the
+// package.
+//
+// import { vlyPlugin } from "@vly-ai/integrations";
+
 import { DEV_BACKEND, isLoopbackUrl } from "./src/lib/backend";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
@@ -15,6 +24,11 @@ import { defineConfig, type UserConfig } from "vite";
  * laptop) fails before Vite even starts, because the package is not there. This
  * way the build carries on without it, so nothing outside your computer can
  * stop it from running.
+ *
+ * There is therefore no `import` of that package anywhere in this file, and it
+ * must not come back: this config is the first thing Vite loads, so one static
+ * import of a package that is only an optional dependency is the difference
+ * between the app running on your own machine and not starting at all.
  */
 async function loadVlyPlugin() {
   // Never on a real deploy. `VERCEL` is set by Vercel's build image, so a site

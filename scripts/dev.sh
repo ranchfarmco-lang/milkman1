@@ -40,7 +40,16 @@
 
 set -u
 
-BACKEND="${VITE_CONVEX_URL:-http://127.0.0.1:3210}"
+# The backend a development run uses is always this machine's own — the address
+# `src/lib/backend.ts` calls `DEV_BACKEND`, probes before anything is drawn, and
+# carries calls through the dev server when the page is read from somewhere
+# else. It is written down here rather than read from the environment on
+# purpose: in a development run `VITE_CONVEX_URL` is only the *fallback* for a
+# backend that is not answering, so an address taken from it would point the
+# page at whatever deployment the project is configured with — this project's
+# was one that had hit a usage limit and refused every call — while the backend
+# this script is about to start sat unused.
+BACKEND="http://127.0.0.1:3210"
 LOG_DIR=".vly-run"
 LOG="$LOG_DIR/convex-dev.log"
 
@@ -51,8 +60,78 @@ if command -v curl >/dev/null 2>&1 &&
   echo "dev: Convex is already answering on ${BACKEND}"
 else
   mkdir -p "$LOG_DIR"
-  echo "dev: starting the Convex backend; its output goes to $LOG"
-  bunx convex dev >>"$LOG" 2>&1 &
+  echo "dev: starting this machine's Convex backend; its output goes to $LOG"
+
+  # The deployment this machine already made, when there is one: naming it keeps
+  # the CLI from having to choose, and from making a second backend beside the
+  # first. Read with `sed` so this needs nothing but the shell.
+  LOCAL_NAME=""
+  if [ -f .convex/local/default/config.json ]; then
+    LOCAL_NAME="$(sed -n 's/.*"deploymentName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' .convex/local/default/config.json)"
+  fi
+
+  # Account-free, and by name — not the same thing as running `convex dev`
+  # plainly, and the difference is why the page once sat waiting for a backend
+  # that never started. `.env.local` names a deployment; the CLI reads that file
+  # too, and without an account it then stops at "Welcome to developing with
+  # Convex, let's get you logged in", which a non-interactive run cannot answer
+  # (that exact line is in the log for this branch). `CONVEX_AGENT_MODE=anonymous`
+  # asks for the backend on this machine instead, and the deploy-key variables
+  # are taken out of the environment so a hosted deployment cannot be chosen
+  # over it. The same recipe `self-hosting/own.sh` uses: a value set here beats
+  # the file, because the file is loaded without overriding what is already in
+  # the environment.
+  #
+  # Which backend build runs is worth a word, because the CLI's default choice
+  # is not always one a machine can run. The backend is a program the CLI
+  # downloads, and a *newest* build can need a newer C library than an older
+  # machine has — on this machine the newest cached build does, and the loader
+  # says so on the binary's first line (`GLIBC_2.38 not found`). Unpinned, that
+  # is the build the CLI reaches for, and the start dies there.
+  #
+  # So when the newest cached build is one this machine cannot execute, the
+  # version is pinned — through the CLI's own `--local-backend-version` — to the
+  # newest cached build that does run, each candidate being asked to run its own
+  # `--help` (a build that cannot load fails that on its first line). The flag
+  # does work without a Convex account, but only together with the rest of this
+  # recipe: it wants a local deployment selected, which is what
+  # `CONVEX_AGENT_MODE=anonymous` plus the deployment's own name provides.
+  # Without the name it refuses with "can only be used when developing with a
+  # local deployment", and that refusal is worth knowing if this ever stops
+  # working. `OWN_BACKEND_VERSION` still overrides the probe, for a machine
+  # whose cache holds a build the probe dislikes.
+  #
+  # When the newest cached build runs — the usual case, and the case while the
+  # cache is still empty — nothing is pinned and the CLI chooses, including
+  # downloading something newer than anything cached here.
+  PIN_VERSION="${OWN_BACKEND_VERSION:-}"
+  if [ -z "$PIN_VERSION" ]; then
+    seen_broken=""
+    for name in $(ls -1 "$HOME/.cache/convex/binaries" 2>/dev/null | sort -r); do
+      binary="$HOME/.cache/convex/binaries/$name/convex-local-backend"
+      [ -f "$binary" ] || continue
+      if "$binary" --help >/dev/null 2>&1; then
+        [ -n "$seen_broken" ] && PIN_VERSION="$name"
+        break
+      fi
+      seen_broken="1"
+    done
+  fi
+
+  if [ -n "$PIN_VERSION" ]; then
+    echo "dev: backend build pinned to $PIN_VERSION — the newest cached one cannot run on this machine"
+    env -u CONVEX_DEPLOY_KEY -u CONVEX_DEPLOYMENT_TOKEN -u CONVEX_DEPLOYMENT \
+      -u CONVEX_SELF_HOSTED_URL -u CONVEX_SELF_HOSTED_ADMIN_KEY \
+      ${LOCAL_NAME:+"CONVEX_DEPLOYMENT=$LOCAL_NAME"} \
+      CONVEX_AGENT_MODE=anonymous \
+      bunx convex dev --local-backend-version "$PIN_VERSION" >>"$LOG" 2>&1 &
+  else
+    env -u CONVEX_DEPLOY_KEY -u CONVEX_DEPLOYMENT_TOKEN -u CONVEX_DEPLOYMENT \
+      -u CONVEX_SELF_HOSTED_URL -u CONVEX_SELF_HOSTED_ADMIN_KEY \
+      ${LOCAL_NAME:+"CONVEX_DEPLOYMENT=$LOCAL_NAME"} \
+      CONVEX_AGENT_MODE=anonymous \
+      bunx convex dev >>"$LOG" 2>&1 &
+  fi
   # A moment of grace, so a backend that fails to start has written why to the
   # log before Vite fills the terminal with its own output. Not a wait for
   # readiness — Vite comes up either way, on purpose.

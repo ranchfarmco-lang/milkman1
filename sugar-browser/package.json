@@ -1,0 +1,54 @@
+{
+  "name": "sugar-browser",
+  "productName": "SUGAR Browser",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SUGAR Browser — a real, local-first, portable desktop browser with the SUGAR AI assistant built in and able to drive it.",
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron .",
+    "start:portable": "electron . --portable",
+    "test": "node tests/run.js",
+    "check": "node --check main.js && node --check preload.js && node --check ui/app.js && node tests/run.js",
+    "dist": "electron-builder",
+    "dist:dir": "electron-builder --dir",
+    "dist:linux": "electron-builder --linux",
+    "dist:win": "electron-builder --win",
+    "dist:win:installer": "electron-builder --win nsis",
+    "dist:win:portable": "electron-builder --win portable",
+    "dist:mac": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "org.sugarbrowser.app",
+    "productName": "SUGAR Browser",
+    "executableName": "SUGARBrowser",
+    "files": ["main.js", "preload.js", "ui/**/*", "src/**/*", "package.json"],
+    "win": {
+      "target": ["nsis", "portable"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "artifactName": "SUGARBrowser-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "SUGARBrowser-Portable-${version}.${ext}"
+    },
+    "linux": {
+      "target": ["AppImage", "tar.gz"],
+      "category": "Network",
+      "artifactName": "SUGARBrowser-${version}.${ext}"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.productivity",
+      "artifactName": "SUGARBrowser-${version}.${ext}"
+    }
+  }
+}

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SUGAR Browser</title>
+    <style>
+      :root {
+        --bg: #07090d;
+        --panel: #101827;
+        --line: #1e2a3f;
+        --ink: #e9eefb;
+        --dim: #93a2be;
+        --accent: #ffb454;
+        --accent-2: #5eead4;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        min-height: 100%;
+        background: radial-gradient(1200px 600px at 50% -10%, #14203a 0%, var(--bg) 55%);
+        color: var(--ink);
+        font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      .wrap { max-width: 760px; margin: 0 auto; padding: 12vh 24px 64px; }
+      .brand { display: flex; align-items: center; gap: 12px; }
+      .mark {
+        width: 44px; height: 44px; border-radius: 14px;
+        background: linear-gradient(140deg, var(--accent), #ff7a59);
+        display: grid; place-items: center; font-size: 24px;
+        box-shadow: 0 10px 30px rgba(255, 180, 84, 0.25);
+      }
+      h1 { margin: 0; font-size: 26px; letter-spacing: 0.2px; }
+      h1 span { color: var(--accent); }
+      .sub { color: var(--dim); margin: 6px 0 30px; }
+      .search {
+        display: flex; gap: 8px; margin-bottom: 26px;
+      }
+      .search input {
+        flex: 1; height: 46px; padding: 0 16px; border-radius: 14px;
+        border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+        font: inherit; outline: none;
+      }
+      .search input:focus { border-color: var(--accent-2); }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+      a.tile {
+        display: block; padding: 16px 14px; border-radius: 14px;
+        border: 1px solid var(--line); background: rgba(255, 255, 255, 0.03);
+        color: var(--ink); text-decoration: none; transition: 120ms ease;
+      }
+      a.tile:hover { background: rgba(255, 255, 255, 0.07); border-color: #33507a; transform: translateY(-1px); }
+      a.tile b { display: block; font-size: 14px; }
+      a.tile small { color: var(--dim); }
+      .note { margin-top: 30px; color: var(--dim); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; }
+      .note code { color: var(--accent-2); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="brand">
+        <div class="mark">&#127851;</div>
+        <div>
+          <h1>SUGAR <span>Browser</span></h1>
+          <div class="sub">A local browser that belongs to this device &mdash; portable, offline-capable, with SUGAR built in.</div>
+        </div>
+      </div>
+
+      <form class="search" id="search">
+        <input id="q" placeholder="Search the web, or type an address" autocomplete="off" autofocus />
+      </form>
+
+      <div class="grid" id="tiles">
+        <a class="tile" href="https://duckduckgo.com/"><b>DuckDuckGo</b><small>Search</small></a>
+        <a class="tile" href="https://en.wikipedia.org/"><b>Wikipedia</b><small>Reference</small></a>
+        <a class="tile" href="https://github.com/"><b>GitHub</b><small>Code</small></a>
+        <a class="tile" href="https://news.google.com/"><b>News</b><small>Headlines</small></a>
+        <a class="tile" href="https://www.openstreetmap.org/"><b>Maps</b><small>Places</small></a>
+        <a class="tile" href="https://www.weather.gov/"><b>Weather</b><small>Forecast</small></a>
+      </div>
+
+      <div class="note">
+        Everything here stays on this machine. Ask SUGAR with <code>Ctrl+K</code> &mdash; try
+        &ldquo;open wikipedia&rdquo;, &ldquo;search for local-first software&rdquo;, or
+        &ldquo;compare these pages&rdquo;.
+      </div>
+    </div>
+
+    <script>
+      // The start page navigates the tab it is drawn in, so it works as a real
+      // page rather than reaching back into the browser.
+      document.getElementById("q").addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        const value = event.target.value.trim();
+        if (value) window.location.href = value.includes(".") && !value.includes(" ") ? `https://${value}` : `https://duckduckgo.com/?q=${encodeURIComponent(value)}`;
+      });
+    </script>
+  </body>
+</html>

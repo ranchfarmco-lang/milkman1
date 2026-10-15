@@ -93,15 +93,50 @@ bunx convex import --path ./hub-export     # pointed at the new one
 
 If the old deployment has already been disabled, use the hub's own backup
 instead: **Offline Brain → Backup → Everything**, then import `data/hub-data.json`
-from inside the archive one table at a time.
+from inside the archive one table at a time. A snapshot already taken with
+`bunx convex export` comes across in one command — `bunx convex import
+--replace-all -y <snapshot.zip>`, with the target deployment selected — which is
+what `backups/README.md` does.
 
 ## 4. Keeping it ours
 
 - The frontend is static files on Vercel and the backend is a Convex project in
   your name. Neither can be switched off by anyone but you.
-- To take the hub off the internet entirely, `self-host/setup.sh` (in a
-  downloaded copy) runs the same open-source Convex backend and the same pages
-  on your own machine at <http://localhost:8080>, with no account anywhere.
+- To take the hub off the internet entirely, `bun run self-host` (or
+  `bun run own`, which needs no Docker at all) runs the same open-source Convex
+  backend and the same pages on your own machine at <http://localhost:8080>,
+  with no account anywhere. `self-hosting/README.md` is the whole of it, and it
+  is the answer to a deployment that has been paused by a usage limit — see the
+  top of that file.
 - The build does **not** need Freebuff. `@vly-ai/integrations` is optional and is
   loaded only if it happens to be installed, so a copy of this project with no
   Freebuff package builds and runs the same.
+
+## 5. Making it private
+
+A deployed hub is private by default, and it is the server — not the screen —
+that decides who gets in:
+
+- The **first device** to sign in claims the hub and becomes its **owner**. If
+  `HUB_PASSWORD` is set, claiming also requires answering it.
+- Any **later device** is refused by every private function until it is
+  authorised: its account answers the family password, or the owner approves it
+  in **Control Room → Security → Authorised devices**. A copied app does not
+  inherit access; it has no password and no authorisation.
+- With **no** `HUB_PASSWORD` set the hub is open, as it always was, so a private
+  machine is never locked out by the gate — device authorisation is what you get
+  when you set a password.
+- **Revoking** a device there takes its session away immediately — its next call
+  fails because it no longer has an authorised device, and reopening the app
+  does not bring it back.
+- The **security log** (same panel) records sign-ins, new devices,
+  authorisations, revocations and ended sessions.
+- AI provider keys stay in the deployment's environment. The browser never sees
+  them; Sugar calls the provider, not the page.
+
+To run the whole backend on hardware you control — including behind a VPN — see
+[`self-hosting/`](./self-hosting/README.md). It covers the Docker stack, the
+environment template, backups, and keeping the backend off the public internet.
+
+Before handing the app out, check **Control Room → Security** reads `CONNECTED`,
+`SECURE`, `AUTHENTICATED`, `AUTHORIZED`, `ACTIVE`.

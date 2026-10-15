@@ -13,10 +13,18 @@ __pycache__/
 .env.*
 !.env.example
 
-# Local-only state: which Convex deployment this machine is pointed at, and the
-# platform's own run logs.
+# Local-only state: which Convex deployment this machine is pointed at, the
+# local backend's own data directory (files, modules, exports — eleven
+# megabytes of this machine's storage, with no database to read it back), and
+# the platform's own run logs.
 .convex
+convex_local_storage
 .vly-run
+
+# The independent bundle `self-hosting/bundle.sh` writes: a runtime, a backend
+# program and an installed node_modules, made to be copied somewhere else rather
+# than kept here. Hundreds of megabytes, all of it reproducible from this tree.
+dist-independent
 
 # A vendored copy of someone else's source tree (~81 MB, including ripgrep
 # binaries and a 18 MB tarball) that the offline brain documents. It is a
@@ -33,9 +41,13 @@ offline-ai-coding-brain
 *.tar.gz
 *.zip
 
-# ...except the one archive the app actually serves. It sits inside the offline
-# brain package, every download on the Offline Brain page carries it, and the
-# installer unpacks it — so a downloaded copy is complete and fetches nothing.
+# ...except the two archives the app actually serves. They sit inside the
+# offline brain package, every download on the Offline Brain page carries them,
+# the installer unpacks both, and `bun run test:this-app` reads them out of
+# `public/` — so a downloaded or freshly cloned copy is complete and fetches
+# nothing. Both have to be named: a `.zip` that is not negated is not saved, and
+# a repository missing the app's own archive is not this app.
 !public/offline-brain/source/freebuff-source.zip
+!public/offline-brain/source/this-app-source.zip
 .vercel
 .env*

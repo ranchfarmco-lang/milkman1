@@ -3,6 +3,7 @@ import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery } from "convex/react";
 import { Component, lazy, type ReactNode } from "react";
+import { Navigate } from "react-router";
 
 // The hub's own frame, loaded the same lazy way `main.tsx` loads it, so opening
 // one of these pages inside the hub costs no extra bundle on any other page.
@@ -39,10 +40,26 @@ const AppShell = lazy(() => import("@/pages/AppShell.tsx"));
  */
 
 /** Signed in and unlocked is the hub; anything else is the public frame. */
-function HubFrame({ children }: { children: ReactNode }) {
+function HubFrame({
+  children,
+  into,
+}: {
+  children: ReactNode;
+  /** The Control Room section this address now belongs to, when it has one. */
+  into?: string;
+}) {
   const { isAuthenticated } = useAuth();
   const access = useQuery(api.access.state);
   const inHub = isAuthenticated && access?.unlocked === true;
+
+  // Inside the hub there is one page for all of this now. The Web Portal and
+  // the Offline Brain are sections of the Control Room rather than places of
+  // their own, so their old addresses land on the right section of it instead
+  // of opening a second copy of the same thing in a different frame. `into`
+  // is the section's name; an address without one renders as it always did.
+  if (inHub && into) {
+    return <Navigate to={`/control-room#${into}`} replace />;
+  }
 
   return inHub ? (
     <AppShell>{children}</AppShell>
@@ -94,10 +111,17 @@ class FrameBoundary extends Component<
   }
 }
 
-export function HubPage({ children }: { children: ReactNode }) {
+export function HubPage({
+  children,
+  into,
+}: {
+  children: ReactNode;
+  /** The Control Room section this address now belongs to, when it has one. */
+  into?: string;
+}) {
   return (
     <FrameBoundary fallback={<PublicShell>{children}</PublicShell>}>
-      <HubFrame>{children}</HubFrame>
+      <HubFrame into={into}>{children}</HubFrame>
     </FrameBoundary>
   );
 }

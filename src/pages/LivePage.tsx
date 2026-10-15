@@ -1,4 +1,5 @@
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import type {
   AlertItem,
   Aircraft,
@@ -8,10 +9,12 @@ import type {
   Economy,
   FireItem,
   HayPrice,
+  LocalTown,
   MarketReading,
   MoonSky,
   NewsItem,
   Quake,
+  RundownLine,
   SnowPoint,
   Source,
   SunSky,
@@ -26,12 +29,18 @@ import {
 } from "@/convex/live_data";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useAction, useConvexConnectionState, useQuery } from "convex/react";
+import {
+  useAction,
+  useConvexConnectionState,
+  useMutation,
+  useQuery,
+} from "convex/react";
 import { motion } from "framer-motion";
 import {
   Activity,
   AlertTriangle,
   Bitcoin,
+  Box,
   CalendarDays,
   CircleDollarSign,
   CloudSun,
@@ -58,6 +67,7 @@ import {
   Store,
   Sun,
   Thermometer,
+  Trash2,
   Truck,
   Volume2,
   VolumeX,
@@ -140,6 +150,33 @@ function clock(ms: number | null): string {
   return new Date(ms).toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
+  });
+}
+
+/**
+ * A calendar day for a city-calendar event. Those dates are stored as midnight
+ * UTC of the day, so they are read back in UTC — Denver time would slide every
+ * event a day back.
+ */
+function dayLabel(ms: number | null): string {
+  if (!ms) return "";
+  return new Date(ms).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/** The clock the board runs on — Colorado wall time — for a moment. */
+function denverClock(ms: number | null): string {
+  if (!ms) return "—";
+  return new Date(ms).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "America/Denver",
   });
 }
 
@@ -435,6 +472,201 @@ function NewsList({ source, what }: { source: Source<NewsItem[]>; what: string }
         </li>
       ))}
     </ul>
+  );
+}
+
+/** One hometown: what its paper wrote, what is for sale, what is happening. */
+/**
+ * A box somebody asked for, rather than one the board was built with.
+ *
+ * The assistant installs these from a conversation — a feed, a sale board, an
+ * events calendar — and the hub fetches them on its own timer, so the wall
+ * keeps growing without anybody editing code. It says when it was read and how
+ * to take it back down, and a box that has gone quiet says why inside itself.
+ */
+function InstalledBox({
+  box,
+}: {
+  box: {
+    _id: Id<"liveBoxes">;
+    title: string;
+    url: string;
+    pipeline: string;
+    filter: string | null;
+    town: string | null;
+    why: string;
+    // v.any() on the server, so it arrives untyped; narrowed here.
+    data: unknown;
+    readAt: number | null;
+    error: string | null;
+  };
+}) {
+  const refreshBox = useAction(api.live_boxes.refresh);
+  const removeBox = useMutation(api.live_boxes.remove);
+  const [busy, setBusy] = useState(false);
+
+  const found = (box.data ?? null) as {
+    rows?: { title: string; link: string; at: number | null; from: string }[];
+    source?: string;
+  } | null;
+  const rows = found?.rows ?? [];
+
+  const onRefresh = async () => {
+    setBusy(true);
+    try {
+      const found = await refreshBox({ id: box._id });
+      if (found.ok) toast.success(`“${box.title}” refreshed.`);
+      else toast.error(`“${box.title}” did not answer: ${found.error}`);
+    } catch {
+      toast.error("Could not refresh that box just now.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onRemove = async () => {
+    try {
+      await removeBox({ id: box._id });
+      toast.success(`“${box.title}” is off the board.`);
+    } catch {
+      toast.error("Could not take that box down just now.");
+    }
+  };
+
+  return (
+    <Tile
+      title={box.title}
+      icon={Box}
+      tone="good"
+      status={box.town ?? box.pipeline}
+      source={found?.source || box.url}
+      sourceHref={box.url}
+      at={box.readAt}
+      note="installed by the assistant"
+      className="ring-1 ring-emerald-500/20"
+    >
+      <div className="flex h-full flex-col gap-2">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
+            {box.filter ? `kept to “${box.filter}”` : "everything it answers"}
+          </span>
+          <button
+            type="button"
+            onClick={() => void onRefresh()}
+            disabled={busy}
+            className="ml-auto inline-flex cursor-pointer items-center gap-1 rounded-md border border-border/60 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {busy ? (
+              <Loader2 className="size-2.5 animate-spin" />
+            ) : (
+              <RefreshCw className="size-2.5" />
+            )}
+            Read now
+          </button>
+          <button
+            type="button"
+            onClick={() => void onRemove()}
+            className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border/60 px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-muted-foreground transition-colors hover:border-red-500/40 hover:text-red-300"
+          >
+            <Trash2 className="size-2.5" />
+            Take down
+          </button>
+        </div>
+
+        {box.error ? (
+          <FeedDown what={box.title} reason={box.error} />
+        ) : rows.length ? (
+          <ul className="flex flex-col gap-1.5">
+            {rows.map((row, index) => (
+              <li key={`${row.link}-${index}`} className="text-[11px] leading-4">
+                {row.link ? (
+                  <a
+                    href={row.link}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="transition-colors hover:text-foreground hover:underline"
+                  >
+                    {row.title}
+                  </a>
+                ) : (
+                  row.title
+                )}{" "}
+                <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
+                  {row.at ? timeAgo(row.at) : row.from}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <Quiet text="Installed — the first read has not landed yet." />
+        )}
+
+        {box.why ? (
+          <p className="mt-auto text-[9px] leading-4 text-muted-foreground">
+            {box.why}
+          </p>
+        ) : null}
+      </div>
+    </Tile>
+  );
+}
+
+function LocalTownTile({ town, at }: { town: LocalTown; at: number }) {
+  const count = town.news.length + town.sales.length + town.events.length;
+
+  const group = (label: string, items: LocalTown["news"], dated = false) =>
+    items.length ? (
+      <div>
+        <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+          {label}
+        </p>
+        <ul className="mt-1 flex flex-col gap-1.5">
+          {items.map((item) => (
+            <li
+              key={`${item.link}-${item.title}`}
+              className="text-[11px] leading-4"
+            >
+              <a
+                href={item.link}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="transition-colors hover:text-foreground hover:underline"
+              >
+                {item.title}
+              </a>{" "}
+              <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
+                {dated ? dayLabel(item.at) : item.at ? timeAgo(item.at) : item.from}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ) : null;
+
+  return (
+    <Tile
+      title={town.name}
+      icon={MapPin}
+      status={count ? `${count} found` : "quiet"}
+      source={town.read.length ? town.read.join(" · ") : "Nothing answered"}
+      sourceHref={town.home}
+      at={at}
+    >
+      <div className="flex flex-col gap-2.5">
+        {group("News", town.news)}
+        {group("Yard sales", town.sales)}
+        {group("Happening", town.events, true)}
+        {!count ? (
+          <Quiet text={`Nothing came back for ${town.name} just now.`} />
+        ) : null}
+        {town.refused.length ? (
+          <p className="text-[9px] leading-4 text-muted-foreground">
+            Would not answer: {town.refused.join(", ")}. Tried again on the next
+            refresh.
+          </p>
+        ) : null}
+      </div>
+    </Tile>
   );
 }
 
@@ -1011,6 +1243,11 @@ export default function LivePage() {
     ? data.airspace.data.notable
     : [];
   const hay = data?.hay.ok ? data.hay.data : null;
+  const local = data?.local.ok ? data.local.data : null;
+  const rundown = data?.rundown.ok ? data.rundown.data : null;
+  // The boxes the assistant installed, drawn beside the board's own — the
+  // server filters these to the account reading them, like the calendar.
+  const installed = useQuery(api.live_boxes.list) ?? [];
 
   const energy = data?.energy.ok ? data.energy.data : [];
   const farm = data?.farm.ok ? data.farm.data : [];
@@ -1052,7 +1289,9 @@ export default function LivePage() {
             The whole Colorado board on one wall — weather, snow, alerts, air,
             water, drought, fire, hay and cattle, the ranch auctions, the
             economy, power, markets, the sun and the moon, airspace, orbit and
-            the headlines. Every number fetched by the hub itself.
+            the headlines — plus the hometown watch: Grand Junction, Rifle and
+            Cañon City read at 5:00 every morning, the rundown written at 8:00.
+            Every number fetched by the hub itself.
           </p>
         </div>
 
@@ -1093,6 +1332,150 @@ export default function LivePage() {
           </p>
         ) : null}
       </div>
+
+      {/* ==================================================== the local watch */}
+      <div className="rounded-lg border border-border/60 bg-card/40 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            The morning rundown — Grand Junction · Rifle · Cañon City
+          </p>
+          <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
+            {rundown
+              ? `Checked 5:00 AM · rundown written ${denverClock(rundown.at)}`
+              : "reading the hometown feeds…"}
+          </span>
+        </div>
+        {rundown && rundown.lines.length ? (
+          <ul className="mt-2 flex max-h-64 flex-col gap-1.5 overflow-y-auto pr-1">
+            {rundown.lines.map((line: RundownLine, index: number) => (
+              <li
+                key={`${line.place}-${index}`}
+                className="flex items-baseline gap-2 text-[11px] leading-5"
+              >
+                <span className="w-24 shrink-0 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {line.place}
+                </span>
+                <span className="min-w-0 flex-1">{line.text}</span>
+                <span className="shrink-0 text-[9px] uppercase tracking-wider text-muted-foreground">
+                  {line.kind === "event"
+                    ? dayLabel(line.at)
+                    : line.at
+                      ? timeAgo(line.at)
+                      : ""}
+                </span>
+                {line.href ? (
+                  <a
+                    href={line.href}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    <ExternalLink className="size-2.5" />
+                  </a>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            The hub reads the hometown papers, city calendars and sale feeds at
+            5:00 every morning and writes the rundown at 8:00. Facebook and the
+            sale boards are left one click away below — those only open for a
+            signed-in person.
+          </p>
+        )}
+      </div>
+
+      {/* A pipeline that answers on only one source is one outage away from a
+          blank morning. Say so, in the person's words, with who can fix it. */}
+      {local && (local.attention ?? []).length ? (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 px-4 py-3">
+          <div className="flex items-center gap-1.5">
+            <AlertTriangle className="size-3.5 shrink-0 text-amber-400" />
+            <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-amber-400">
+              Needs your attention — a pipeline with one source
+            </p>
+          </div>
+          <ul className="mt-2 flex flex-col gap-1.5">
+            {(local.attention ?? []).map((note: string) => (
+              <li
+                key={note}
+                className="text-[11px] leading-5 text-muted-foreground"
+              >
+                {note}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      <Section label="Local watch — Grand Junction · Rifle · Cañon City">
+        {local ? (
+          local.towns.map((town) => (
+            <LocalTownTile key={town.name} town={town} at={local.at} />
+          ))
+        ) : (
+          <Tile
+            title="Local watch"
+            icon={MapPin}
+            status={data?.local.ok === false ? "no answer" : "reading"}
+            source="The hometown feeds"
+            sourceHref="https://www.gjsentinel.com/"
+            note="read at 5:00 AM"
+          >
+            {data?.local.ok === false ? (
+              <FeedDown
+                what="The hometown feeds"
+                reason={data.local.error}
+              />
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Reading the hometown feeds…
+              </p>
+            )}
+          </Tile>
+        )}
+        {local ? (
+          <Tile
+            title="Facebook & the sale boards"
+            icon={Store}
+            status={`${local.links.length} links`}
+            source="Where only a browser can go"
+            sourceHref={
+              local.links[0]?.href ?? "https://www.facebook.com/marketplace/"
+            }
+            note="one click in"
+          >
+            <ul className="flex flex-col gap-2">
+              {local.links.map((link) => (
+                <li key={link.href}>
+                  <a
+                    href={link.href}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className="inline-flex items-center gap-1 text-[11px] font-medium transition-colors hover:text-foreground hover:underline"
+                  >
+                    {link.label}
+                    <ExternalLink className="size-2.5 shrink-0" />
+                  </a>
+                  <p className="text-[9px] leading-4 text-muted-foreground">
+                    {link.why}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </Tile>
+        ) : null}
+      </Section>
+
+      {/* ============================================= boxes they asked for */}
+      {installed.length ? (
+        <Section label="Boxes you asked for — installed by the assistant">
+          {installed.map((box) => (
+            <InstalledBox key={box._id} box={box} />
+          ))}
+        </Section>
+      ) : null}
 
       {/* ================================================ family calendar */}
       <Section label="The family calendar">

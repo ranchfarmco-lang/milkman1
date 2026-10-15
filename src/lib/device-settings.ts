@@ -152,12 +152,53 @@ export const DEVICE_GROUPS: DeviceGroup[] = [
         default: true,
       },
       {
+        id: "voice_studio",
+        kind: "toggle",
+        section: "Assistant",
+        label: "Studio voice",
+        description:
+          "Speak with a real text-to-speech model instead of this device's own engine — the voice the Control Room's Voice section describes, warm and low with a person's phrasing. It needs one of the speech providers connected (OpenRouter or Groq, both already used for the AI systems here), and the words being spoken are sent to that provider, so an answer said aloud leaves the hub while a silent one does not. With no key, or with this switched off, or with the connection gone, she speaks with the voice on this device instead — and the change happens mid-reply rather than dropping it.",
+        default: true,
+      },
+      {
         id: "ai_auto_refresh",
         kind: "toggle",
         section: "Assistant",
         label: "Auto refresh the AI systems",
         description:
           "While the Control Room is open, quietly ask every AI system whether it is still answering, every few minutes. Switch it off to check only when you press Refresh.",
+        default: true,
+      },
+
+      /* -------------------------------------------------------- companion */
+      // The little box in the corner, which follows them from page to page.
+      // These three are the parts of it a person would want to change: how it
+      // hears them, whether it offers anything unasked, and whether it talks.
+      {
+        id: "companion_hands_free",
+        kind: "toggle",
+        section: "Companion",
+        label: "Hands-free microphone",
+        description:
+          "Leave the microphone open wherever you go inside the hub, so the little box in the corner hears you without anything being pressed first. It shuts itself while the AI is thinking or talking, so it never answers its own voice. Off until you switch it on here or press the microphone in the box.",
+        default: false,
+      },
+      {
+        id: "companion_hints",
+        kind: "toggle",
+        section: "Companion",
+        label: "Offer hints as I work",
+        description:
+          "Let the box in the corner speak up unprompted: a line about a page you have just opened, and a word about what you are doing. It is never unprompted while Do not disturb is on, and never twice about the same thing. Spelling is not one of its jobs — the field you are typing in does that itself, through the browser's own checker.",
+        default: true,
+      },
+      {
+        id: "companion_speak",
+        kind: "toggle",
+        section: "Companion",
+        label: "Read the little box out loud",
+        description:
+          "Say what the box in the corner answers, as well as showing it — which is what makes hands-free a conversation rather than a transcript. Silence mutes this too, exactly as it does the assistant's own voice.",
         default: true,
       },
 
@@ -238,7 +279,7 @@ export const DEVICE_GROUPS: DeviceGroup[] = [
         section: "Calls",
         label: "Voice & video calls",
         description:
-          "Calls go straight between your family's devices, peer to peer and encrypted end to end. Get on from the Messenger — there is no switch to flip here.",
+          "Calls go between your family's devices, peer to peer or through your own media server, encrypted end to end. The bell on anybody's box rings their hub and notifies them; a screen anybody shares opens in a portal of its own. Get on from the Messenger: the call then follows you across the hub. There is no switch to flip here.",
       },
     ],
   },
@@ -266,6 +307,9 @@ export const DEFAULT_DEVICE_SETTINGS: Record<string, boolean> =
     DEVICE_GROUPS.flatMap((group) =>
       group.items
         .filter((item) => item.kind === "toggle")
-        .map((item) => [item.id, item.kind === "toggle" ? item.default : false]),
+        .map((item) => [
+          item.id,
+          item.kind === "toggle" ? item.default : false,
+        ]),
     ),
   );

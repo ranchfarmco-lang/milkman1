@@ -523,11 +523,11 @@ function MonthGrid({
                   type="button"
                   onClick={() => onAdd(cell)}
                   aria-label="Add to this day"
-                  // `hover` is behind `@media (hover: hover)`, so on a phone
-                  // or a tablet this was invisible and there was no way at all
-                  // to add to a particular day. A coarse pointer gets it
-                  // always; a mouse still gets it on the way past.
-                  className="ml-auto shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100 hover:bg-white/10 hover:text-foreground"
+                  // Always visible, on every device. It used to appear only on
+                  // hover, which meant a phone or tablet had no way at all to
+                  // add to a particular day, and anyone with a mouse had to
+                  // find it first. There is now a standing "+" on every day.
+                  className="ml-auto grid size-[18px] shrink-0 cursor-pointer place-items-center rounded border border-white/15 bg-white/[0.06] text-muted-foreground transition-colors hover:border-white/40 hover:bg-white/15 hover:text-foreground"
                   title="Add to this day"
                 >
                   <Plus className="size-3" />

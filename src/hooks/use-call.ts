@@ -1,9 +1,10 @@
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { useAuth } from "@/hooks/use-auth";
+import { heldCall, isMine } from "@/lib/call-surfaces";
 import { mintTurnCredentials } from "@/lib/turn-credentials";
 import { useAction, useMutation, useQuery } from "convex/react";
-import { ConnectionState, Room, RoomEvent } from "livekit-client";
+import { ConnectionState, Room, RoomEvent, Track } from "livekit-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /**
@@ -25,6 +26,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
  *
  * Either way Convex carries only the handshake and the ring, and the media
  * stays encrypted in transit (DTLS-SRTP).
+ *
+ * A **shared screen** is a third track rather than a third call. It is captured
+ * with `getDisplayMedia`, carried the same way the camera is, and routed by the
+ * stream id it travels on — announced to the others over the same channel the
+ * handshake uses, because a screen and a face are both simply "a video track"
+ * once they arrive. That is what lets a screen open in a portal of its own
+ * instead of taking somebody's seat, and what keeps the rest of the call
+ * running while it does.
+ *
+ * One rule shapes the whole hook: **this tab is only in a call it joined.** A
+ * live row on the server can outlive the tab that made it, and a second device
+ * signed in to the same account is a member of the same call — neither of those
+ * is this tab being in a call. `isMine` and `heldCall`
+ * (`src/lib/call-surfaces.ts`) draw that line, and a membership left behind is
+ * offered as a plain line in the Messenger rather than a panel over whatever
+ * page happens to be open.
  */
 
 /**
@@ -142,12 +159,34 @@ export function useCall() {
   const { user } = useAuth();
   const myId = user?._id ?? null;
 
-  const current = useQuery(api.calls.current);
+  const live = useQuery(api.calls.current);
+  /**
+   * The call this tab itself started, joined or answered. Held rather than
+   * derived, because it is the one thing the server cannot know: two tabs and
+   * two devices are the same person, and only the tab that asked is in it.
+   */
+  const [joinedHere, setJoinedHere] = useState<string | null>(null);
+
+  /**
+   * That name, only while the server still has that call: a call that is over,
+   * or that has been replaced by a newer one, cannot be "the call this tab is
+   * in" however recently this tab asked to join it.
+   */
+  const session =
+    joinedHere && live && (live.incoming || live.callId === joinedHere)
+      ? joinedHere
+      : null;
+
+  const current = isMine(live, session) ? (live ?? null) : null;
+  /** A live membership this tab never joined — a closed tab's call. */
+  const held = heldCall(live, session);
   const callId = current?.callId ?? null;
 
   const signals = useQuery(api.calls.signals, callId ? { callId } : "skip");
 
   const startCall = useMutation(api.calls.start);
+  /** Ring more people into the call this tab is already on. */
+  const inviteToCall = useMutation(api.calls.invite);
   const joinCall = useMutation(api.calls.join);
   const answerCall = useMutation(api.calls.answer);
   const declineCall = useMutation(api.calls.decline);
@@ -159,6 +198,14 @@ export function useCall() {
 
   const [muted, setMuted] = useState(false);
   const [speaker, setSpeaker] = useState(true);
+  /**
+   * Every shared screen, by the person sharing it — mine included, so the
+   * portal carrying one never needs to know who is holding it.
+   */
+  const [screens, setScreens] = useState<Record<string, MediaStream>>({});
+  const [sharing, setSharing] = useState(false);
+  /** Said plainly when a browser will not give the call a screen to share. */
+  const [shareProblem, setShareProblem] = useState<string | null>(null);
   const [cameraOn, setCameraOn] = useState(true);
   const [remoteStreams, setRemoteStreams] = useState<
     Record<string, MediaStream>
@@ -204,6 +251,24 @@ export function useCall() {
   /** Local tracks already handed to the relay, so none is published twice. */
   const publishedRef = useRef(new Set<string>());
 
+  /* ----------------------------------------------------------- the screen */
+
+  /** The screen track being sent, and the stream it travels on. */
+  const screenTrackRef = useRef<MediaStreamTrack | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  /** The sender each peer was handed, so a screen is given over once. */
+  const screenSendersRef = useRef(new Map<string, RTCRtpSender>());
+  /** Stream ids announced as somebody's screen: which stream, and whose. */
+  const screenStreamsRef = useRef(new Map<string, string>());
+  /** Screen tracks that have arrived, so a late announcement still routes. */
+  const screenTracksRef = useRef(new Map<string, MediaStreamTrack>());
+  /** The other joined people, readable from a callback without rebuilding it. */
+  const othersRef = useRef<string[]>([]);
+  /** Where a link coming up asks for the screen to be handed over again. */
+  const syncScreenRef = useRef<(() => void) | null>(null);
+  /** Read by the browser's own "Stop sharing" bar, which outlives a render. */
+  const stopShareRef = useRef<(() => void) | null>(null);
+
   const joined = current?.myState === "joined";
   const kind = current?.kind ?? "audio";
   const others = (current?.people ?? []).filter(
@@ -214,7 +279,24 @@ export function useCall() {
     .sort()
     .join(",");
 
+  // The same list, readable from the callbacks below without making each of
+  // them a new function every time somebody's name changes.
+  useEffect(() => {
+    othersRef.current = otherKey ? otherKey.split(",") : [];
+  }, [otherKey]);
+
   const teardown = useCallback(() => {
+    // A shared screen does not outlive the call: the browser's own sharing bar
+    // would still be up, and the track would keep the machine awake.
+    screenTrackRef.current?.stop();
+    screenTrackRef.current = null;
+    screenStreamRef.current = null;
+    screenSendersRef.current.clear();
+    screenStreamsRef.current.clear();
+    screenTracksRef.current.clear();
+    setSharing(false);
+    setScreens({});
+
     for (const peer of peersRef.current.values()) {
       peer.connection.onicecandidate = null;
       peer.connection.ontrack = null;
@@ -434,10 +516,33 @@ export function useCall() {
       setRemoteStreams((previous) => ({ ...previous, [identity]: stream }));
     };
 
+    const dropScreen = (identity: string, media: MediaStreamTrack) => {
+      screenTracksRef.current.delete(media.id);
+      setScreens((previous) => {
+        const next = { ...previous };
+        delete next[identity];
+        return next;
+      });
+    };
+
     room
-      .on(RoomEvent.TrackSubscribed, (track, _publication, participant) => {
+      .on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
         const identity = participant.identity;
         const media = track.mediaStreamTrack;
+
+        // The relay says outright what a track is, so a screen never joins the
+        // grid of faces and no face loses its seat to one.
+        if (
+          publication.source === Track.Source.ScreenShare ||
+          publication.trackName === "screen"
+        ) {
+          screenTracksRef.current.set(media.id, media);
+          setScreens((previous) => ({
+            ...previous,
+            [identity]: new MediaStream([media]),
+          }));
+          return;
+        }
 
         let set = trackSets.get(identity);
         if (!set) {
@@ -457,9 +562,19 @@ export function useCall() {
 
         rebuild(identity);
       })
-      .on(RoomEvent.TrackUnsubscribed, (track, _publication, participant) => {
+      .on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
         const identity = participant.identity;
         const media = track.mediaStreamTrack;
+
+        if (
+          publication.source === Track.Source.ScreenShare ||
+          publication.trackName === "screen"
+        ) {
+          dropScreen(identity, media);
+          track.detach().forEach((node) => node.remove());
+          return;
+        }
+
         trackSets.get(identity)?.delete(media);
 
         const element = audioElements.get(media.id);
@@ -476,6 +591,11 @@ export function useCall() {
         // rather than holding a frozen last frame.
         trackSets.delete(participant.identity);
         rebuild(participant.identity);
+        setScreens((previous) => {
+          const next = { ...previous };
+          delete next[participant.identity];
+          return next;
+        });
       });
 
     void (async () => {
@@ -542,6 +662,18 @@ export function useCall() {
         }
       }
 
+      // Somebody already sharing walks a late joiner into the screen too. It
+      // goes on a stream of its own, so the two video tracks stay tellable
+      // apart however they arrive.
+      const screen = screenTrackRef.current;
+      const screenStream = screenStreamRef.current;
+      if (screen && screenStream) {
+        screenSendersRef.current.set(
+          themId,
+          connection.addTrack(screen, screenStream),
+        );
+      }
+
       connection.onicecandidate = (event) => {
         if (!event.candidate || !callId) return;
         void sendSignal({
@@ -554,6 +686,22 @@ export function useCall() {
 
       connection.ontrack = (event) => {
         const incoming = event.streams[0] ?? new MediaStream([event.track]);
+        const media = event.track;
+
+        // A screen is a video track like any other, so which one it is has to
+        // come from the stream it arrived on: the sharer announced that id
+        // before the picture got here. The track is remembered even when the
+        // announcement has not landed yet, because the two travel different
+        // roads and either can arrive first.
+        if (media.kind === "video") {
+          const sharer = screenStreamsRef.current.get(incoming.id);
+          if (sharer) {
+            screenTracksRef.current.set(incoming.id, media);
+            setScreens((previous) => ({ ...previous, [sharer]: incoming }));
+            return;
+          }
+        }
+
         audio.srcObject = incoming;
         audio.muted = !speakerRef.current;
         void audio.play().catch(() => {
@@ -570,6 +718,10 @@ export function useCall() {
         if (state === "connected") {
           peer.restarting = false;
           setFailure(null);
+          // A screen that went on before this link came up still has to reach
+          // it, and a renegotiation is the only way a track joins a connection
+          // that is already carrying a call.
+          syncScreenRef.current?.();
         } else if (state === "failed") {
           setFailure(
             "The direct path did not work — trying a relayed connection.",
@@ -714,6 +866,32 @@ export function useCall() {
             continue;
           }
 
+          // A shared screen going on or off. Not a handshake step at all: it is
+          // the label on a video track, and it is applied whenever it lands —
+          // before the picture arrives, or after it.
+          if (signal.kind === "screen" || signal.kind === "screen-off") {
+            const streamId = signal.payload;
+            if (signal.kind === "screen") {
+              screenStreamsRef.current.set(streamId, themId);
+              const media = screenTracksRef.current.get(streamId) ?? null;
+              if (media) {
+                setScreens((previous) => ({
+                  ...previous,
+                  [themId]: new MediaStream([media]),
+                }));
+              }
+              continue;
+            }
+
+            screenStreamsRef.current.delete(streamId);
+            setScreens((previous) => {
+              const next = { ...previous };
+              delete next[themId];
+              return next;
+            });
+            continue;
+          }
+
           // A network candidate. Hold it until the description is in place.
           const candidate = JSON.parse(
             signal.payload,
@@ -798,12 +976,31 @@ export function useCall() {
       setMuted(false);
       setSpeaker(true);
       setCameraOn(true);
-      await startCall({
+      const id = await startCall({
         kind: nextKind,
         to: to as Id<"users">[],
       });
+      setJoinedHere(id);
     },
     [startCall],
+  );
+
+  /**
+   * Ring people into the call this tab is on — the same call, opened wider.
+   *
+   * `ring` starts a call of its own and ends whatever this tab was in, which is
+   * why it is the wrong thing mid-conversation. Returns how many were actually
+   * rung, so the page can say so instead of guessing.
+   */
+  const invite = useCallback(
+    async (to: string[]) => {
+      if (!callId || !to.length) return 0;
+      return await inviteToCall({
+        callId: callId as Id<"calls">,
+        to: to as Id<"users">[],
+      });
+    },
+    [callId, inviteToCall],
   );
 
   /** Get on the standing video room and wait for the rest to turn up. */
@@ -813,12 +1010,16 @@ export function useCall() {
     setSpeaker(true);
     setCameraOn(true);
     resumeAudio();
-    void joinCall({});
+    void joinCall({}).then((id) => setJoinedHere(id));
   }, [joinCall, resumeAudio]);
 
   const answer = useCallback(() => {
+    if (!callId) return;
+    // Answering is joining: from here on the call is this tab's to carry. The
+    // window is set before the write so the ring stops being a ring at once.
+    setJoinedHere(callId);
     resumeAudio();
-    if (callId) void answerCall({ callId: callId as Id<"calls"> });
+    void answerCall({ callId: callId as Id<"calls"> });
   }, [answerCall, callId, resumeAudio]);
 
   const hangUp = useCallback(() => {
@@ -832,6 +1033,246 @@ export function useCall() {
     void declineCall({ callId: callId as Id<"calls"> });
     teardown();
   }, [callId, declineCall, teardown]);
+
+  /**
+   * Step out of a call this tab never joined — the membership a closed tab or a
+   * second device left behind. Stepping out is not hanging up: everyone still
+   * on the call stays on it.
+   */
+  const stepOut = useCallback(() => {
+    if (!held) return;
+    void leaveCall({ callId: held.callId as Id<"calls"> });
+  }, [held, leaveCall]);
+
+  /**
+   * Get back on a call this tab is not in but this account still is: the same
+   * write as answering, pointed at the call the tab found rather than the one
+   * ringing at it.
+   */
+  const rejoin = useCallback(() => {
+    if (!held) return;
+    setJoinedHere(held.callId);
+    resumeAudio();
+    setFailure(null);
+    void answerCall({ callId: held.callId as Id<"calls"> });
+  }, [answerCall, held, resumeAudio]);
+
+  /* ----------------------------------------------------- sharing a screen */
+
+  /**
+   * Tell the others which stream our screen is on, or that it is over. Nobody's
+   * picture travels through here — this is the line that says which video track
+   * is a screen, so it opens in a portal of its own instead of a seat.
+   */
+  const announceScreen = useCallback(
+    async (streamId: string, on: boolean) => {
+      if (!callId || !myId) return;
+      for (const themId of othersRef.current) {
+        try {
+          await sendSignal({
+            callId: callId as Id<"calls">,
+            toId: themId as Id<"users">,
+            kind: on ? "screen" : "screen-off",
+            payload: streamId,
+          });
+        } catch {
+          // They will still see the track itself; this is only its label.
+        }
+      }
+    },
+    [callId, myId, sendSignal],
+  );
+
+  /**
+   * Offer again on a link that is already carrying a call.
+   *
+   * Adding a track is the one case where "the lower id offers" does not help: a
+   * track only crosses in the offer that proposes it, so whoever is sharing
+   * makes that offer, whatever their id says — and the other side answers it
+   * exactly as it answered the first one. Waiting for a stable state is what
+   * keeps this offer from colliding with a handshake already in flight.
+   */
+  const offerAgain = useCallback(
+    async (themId: string) => {
+      const peer = peersRef.current.get(themId);
+      if (!peer || !callId) return;
+      if (peer.connection.signalingState !== "stable") return;
+      try {
+        const offer = await peer.connection.createOffer();
+        await peer.connection.setLocalDescription(offer);
+        await sendSignal({
+          callId: callId as Id<"calls">,
+          toId: themId as Id<"users">,
+          kind: "offer",
+          payload: JSON.stringify(offer),
+        });
+      } catch {
+        // A later pass takes it; nothing is lost but a moment.
+      }
+    },
+    [callId, sendSignal],
+  );
+
+  /**
+   * Hand our screen to everyone on the call, or take it back. Called when
+   * sharing starts or stops, when a link comes up, and when somebody joins —
+   * the three moments a screen can be missing from a connection.
+   */
+  const syncScreen = useCallback(() => {
+    const track = screenTrackRef.current;
+    const stream = screenStreamRef.current;
+
+    for (const [themId, peer] of peersRef.current) {
+      const sender = screenSendersRef.current.get(themId) ?? null;
+
+      if (track && stream) {
+        if (sender) {
+          if (sender.track !== track) void sender.replaceTrack(track);
+          // A sender whose transceiver has no mid yet never crossed in an
+          // offer, so the offer still has to be made.
+          const negotiated = peer.connection
+            .getTransceivers()
+            .some((one) => one.sender === sender && one.mid !== null);
+          if (!negotiated) void offerAgain(themId);
+          continue;
+        }
+        screenSendersRef.current.set(
+          themId,
+          peer.connection.addTrack(track, stream),
+        );
+        void offerAgain(themId);
+        continue;
+      }
+
+      if (sender) void sender.replaceTrack(null);
+    }
+  }, [offerAgain]);
+
+  useEffect(() => {
+    syncScreenRef.current = syncScreen;
+  }, [syncScreen]);
+
+  /** Stop sharing, on whichever route is carrying it and in the browser too. */
+  const stopShare = useCallback(() => {
+    const track = screenTrackRef.current;
+    const streamId = screenStreamRef.current?.id ?? "";
+    if (!track) return;
+
+    screenTrackRef.current = null;
+    screenStreamRef.current = null;
+    track.onended = null;
+    track.stop();
+    setSharing(false);
+    setScreens((previous) => {
+      const next = { ...previous };
+      if (myId) delete next[myId];
+      return next;
+    });
+
+    for (const sender of screenSendersRef.current.values()) {
+      void sender.replaceTrack(null);
+    }
+    const room = roomRef.current;
+    if (room) void room.localParticipant.unpublishTrack(track);
+    if (streamId) void announceScreen(streamId, false);
+  }, [announceScreen, myId]);
+
+  useEffect(() => {
+    stopShareRef.current = stopShare;
+  }, [stopShare]);
+
+  /**
+   * Ask this device for a screen and put it on the call.
+   *
+   * The ask is the person's own tap, deliberately: a browser only hands a page
+   * a screen in answer to a gesture, and a request made in the background is
+   * refused by Chrome and Firefox both.
+   */
+  const beginShare = useCallback(async () => {
+    if (screenTrackRef.current) return;
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setShareProblem(
+        "This browser will not give a page a screen to share. Open the hub over https (or on localhost) in Chrome, Edge, Firefox or Safari.",
+      );
+      return;
+    }
+
+    let media: MediaStream;
+    try {
+      media = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+      });
+    } catch (error) {
+      const name = error instanceof Error ? error.name : "";
+      if (name !== "AbortError") {
+        setShareProblem(
+          name === "NotAllowedError"
+            ? "The browser was not allowed to share a screen. Allow screen sharing for this site, then tap Share my screen again."
+            : "This device would not give the call a screen to share.",
+        );
+      }
+      return;
+    }
+
+    const track = media.getVideoTracks()[0];
+    if (!track) {
+      setShareProblem("That screen had no picture to share.");
+      return;
+    }
+
+    setShareProblem(null);
+    screenTrackRef.current = track;
+    screenStreamRef.current = media;
+    setSharing(true);
+    // My own screen goes in the same list as everybody else's, so the portal
+    // shows it, the seat marks it and nothing needs a second path for "mine".
+    if (myId) {
+      setScreens((previous) => ({ ...previous, [myId]: media }));
+    }
+    // The browser's own "Stop sharing" bar ends it as firmly as our button.
+    track.onended = () => stopShareRef.current?.();
+
+    const room = roomRef.current;
+    if (room && room.state === ConnectionState.Connected) {
+      void room.localParticipant
+        .publishTrack(track, { name: "screen", source: Track.Source.ScreenShare })
+        .catch(() => undefined);
+    }
+
+    syncScreen();
+    await announceScreen(media.id, true);
+  }, [announceScreen, myId, syncScreen]);
+
+  /**
+   * Share this device's screen. Only offered while on the call, because a
+   * screen is a track *of* a call — there is nowhere else for it to go.
+   */
+  const shareScreen = useCallback(() => {
+    setShareProblem(null);
+    void beginShare();
+  }, [beginShare]);
+
+  // A link that came up while a screen was on still has to be handed the track,
+  // and a link that dropped and came back has to be handed it again.
+  useEffect(() => {
+    if (transport !== "p2p" || !joined) return;
+    syncScreen();
+  }, [transport, joined, otherKey, localStream, sharing, syncScreen]);
+
+  // A screen asked for before the relayed room was up is published when it is.
+  useEffect(() => {
+    if (transport !== "livekit" || !sharing) return;
+    const room = roomRef.current;
+    const track = screenTrackRef.current;
+    if (!room || !track || room.state !== ConnectionState.Connected) return;
+    if (room.localParticipant.getTrackPublication(Track.Source.ScreenShare)) {
+      return;
+    }
+    void room.localParticipant
+      .publishTrack(track, { name: "screen", source: Track.Source.ScreenShare })
+      .catch(() => undefined);
+  }, [transport, sharing, localStream]);
 
   // A ringing call nobody answers gives up on its own. A standing room never
   // does — waiting for the others to turn up is the whole point of it.
@@ -862,6 +1303,14 @@ export function useCall() {
     () => ({
       state,
       current,
+      /**
+       * The live membership this tab is not in: a call a closed tab or another
+       * device left behind. Offered as a line in the Messenger — never as a
+       * panel over whatever page is open — so it can be rejoined or let go.
+       */
+      held,
+      /** Who I am, so a portal knows which screen of the list is mine. */
+      myId,
       kind,
       problem,
       failure,
@@ -875,10 +1324,20 @@ export function useCall() {
       remoteStreams,
       others,
       ring,
+      /** Ring somebody into the call this tab is already on. */
+      invite,
       joinRoom,
       answer,
       decline,
       hangUp,
+      stepOut,
+      rejoin,
+      /** Every shared screen by the person sharing it, mine included. */
+      screens,
+      sharing,
+      shareProblem,
+      shareScreen,
+      stopShare,
       retryMedia,
       retryConnection,
       /** Which way the media is travelling, so a page can say it plainly. */
@@ -887,6 +1346,8 @@ export function useCall() {
     [
       state,
       current,
+      held,
+      myId,
       kind,
       problem,
       failure,
@@ -897,10 +1358,18 @@ export function useCall() {
       remoteStreams,
       others,
       ring,
+      invite,
       joinRoom,
       answer,
       decline,
       hangUp,
+      stepOut,
+      rejoin,
+      screens,
+      sharing,
+      shareProblem,
+      shareScreen,
+      stopShare,
       retryMedia,
       retryConnection,
       transport,

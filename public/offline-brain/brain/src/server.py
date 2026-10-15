@@ -78,6 +78,7 @@ ENDPOINTS = [
     {"method": "GET", "path": "/api/v1/tools", "auth": True, "what": "every tool, with health and stats"},
     {"method": "POST", "path": "/api/v1/tools/run", "auth": True, "what": "{tool, args}"},
     {"method": "GET", "path": "/api/v1/models", "auth": True, "what": "local model servers and their models"},
+    {"method": "POST", "path": "/api/v1/completions", "auth": True, "what": "{url, headers, payload} — one chat request, asked of a local model server and handed back untouched"},
     {"method": "GET", "path": "/api/v1/memory", "auth": True, "what": "search or list memory (?q=&limit=)"},
     {"method": "POST", "path": "/api/v1/memory", "auth": True, "what": "{text, tags, pinned}"},
     {"method": "DELETE", "path": "/api/v1/memory/{id}", "auth": True, "what": "forget one"},
@@ -356,6 +357,7 @@ class Handler(BaseHTTPRequestHandler):
             ),
             ("POST", "/api/v1/tools/run"): lambda _: self._run_tool(),
             ("GET", "/api/v1/models"): lambda _: self._models(),
+            ("POST", "/api/v1/completions"): lambda _: self._completions(),
             ("GET", "/api/v1/memory"): lambda _: self._memory_list(),
             ("POST", "/api/v1/memory"): lambda _: self._memory_add(),
             ("GET", "/api/v1/connectors"): lambda _: self._send(
@@ -518,6 +520,55 @@ The pairing token is printed by <code>python3 brain.py pair</code>.</p>
         if not isinstance(args, dict):
             raise ValueError("args has to be a JSON object")
         self._send(HTTPStatus.OK, tools.registry.run_tool(name, args, self.brain.context()))
+
+    def _completions(self) -> None:
+        """
+        One chat request, asked of a model server on this machine and handed
+        back exactly as it answered.
+
+        This is how a hub page reaches a local model when the browser will not
+        let it ask one itself: the page posts here (loopback, CORS written for
+        this, no mixed-content rule in the way), and this machine asks the model
+        from where it lives. The answer is passed through whole — status, body,
+        `tool_calls` and all — because the hub's assistant reads the tool calls
+        out of it, and a proxy that dropped them would leave the assistant
+        unable to act on anything.
+        """
+        body = self._body()
+        target = str(body.get("url") or "").strip()
+        if not target:
+            raise ValueError("url is required: the address of a model server on this machine")
+
+        payload = body.get("payload")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except ValueError as error:
+                raise ValueError(f"payload has to be JSON: {error}") from error
+        if not isinstance(payload, dict):
+            raise ValueError("payload has to be a JSON object — the chat request itself")
+
+        headers = body.get("headers")
+        headers = headers if isinstance(headers, dict) else {}
+
+        answer = providers.forward(self.brain.settings, target, payload, headers)
+        if not answer.get("ok"):
+            self._error(
+                HTTPStatus.BAD_GATEWAY,
+                str(answer.get("error") or "the model server did not answer"),
+                hint="check the model server is running: `python3 brain.py serve` shows what it can see",
+            )
+            return
+
+        raw = str(answer.get("body") or "")
+        status = int(answer.get("status") or 200)
+        try:
+            parsed = json.loads(raw) if raw.strip() else {}
+        except ValueError:
+            # Not JSON — still the model's own words, so they go back verbatim.
+            self._send(status, raw, content_type="text/plain; charset=utf-8")
+            return
+        self._send(status, parsed)
 
     def _models(self) -> None:
         servers = providers.discover(self.brain.settings)

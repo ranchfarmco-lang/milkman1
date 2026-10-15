@@ -16,8 +16,9 @@
  *      installable in the category, in order;
  *   3. `installers/` — a ready script per component, so one can be run alone;
  *   4. every packaged file the category names, at its own path — the packaged
- *      installers and docs, and for the source category the Freebuff (Codebuff)
- *      reference archive itself, carried as its own bytes.
+ *      installers and docs, and for the source category both archives: the
+ *      Freebuff (Codebuff) reference source and the hub's own app, each carried
+ *      as its own bytes.
  *
  * Nothing is uploaded to make the archive: it is assembled in the browser from
  * what the hub already serves, exactly like every other download here. The
@@ -26,6 +27,7 @@
  * inside the full package too.
  */
 import { stampOf } from "./backup";
+import { readableSize } from "./download";
 import { PACKAGE_BINARY_FILES } from "./offline-brain-files";
 import {
   groupScript,
@@ -84,6 +86,7 @@ export function groupReadme(
   at: string,
   source: string,
   missing: string[],
+  sizes: Record<string, number> = {},
 ): string {
   const paths = groupPackagedPaths(group);
   const scripts = scriptItems(group);
@@ -98,6 +101,12 @@ export function groupReadme(
     `- Files in this archive: ${groupBundleFileCount(group)}${
       missing.length ? ` (${missing.length} unavailable)` : ""
     }`,
+    ...(Object.keys(sizes).length
+      ? [
+          "- Sizes: measured from what the hub was serving when this archive",
+          "  was made",
+        ]
+      : []),
     "",
     "## What is in this folder",
     "",
@@ -119,7 +128,11 @@ export function groupReadme(
 
   lines.push("## Every component in this category", "");
   for (const item of group.items) {
-    const size = sizeOf(item);
+    // A packaged file's size is the measured one wherever the page has measured
+    // it, so this README says what the file weighs now rather than what the
+    // catalog said on the day it was written.
+    const served = item.file ? sizes[item.file] : undefined;
+    const size = served === undefined ? sizeOf(item) : readableSize(served);
     const arrives = item.file
       ? `packaged file: \`${item.file}\``
       : item.script
@@ -171,7 +184,8 @@ export function groupReadme(
     lines.push(
       "Complete: every file this category names is in this archive" +
         (PACKAGE_BINARY_FILES.some((path) => paths.includes(path))
-          ? ", the Freebuff (Codebuff) reference source archive included."
+          ? ", the source archives included — the Freebuff (Codebuff) reference" +
+            " and this app's own source."
           : "."),
       "",
     );
@@ -192,6 +206,7 @@ export async function groupBundleZip(
   at: string,
   source: string,
   fetchBytes: (path: string) => Promise<Uint8Array | null> = async () => null,
+  sizes: Record<string, number> = {},
 ): Promise<{
   blob: Blob;
   files: number;
@@ -222,7 +237,7 @@ export async function groupBundleZip(
   const head: ZipEntry[] = [
     {
       path: `${root}/START-HERE.md`,
-      data: groupReadme(group, at, source, missing),
+      data: groupReadme(group, at, source, missing, sizes),
     },
   ];
   const installer = scripts.length ? `install-${group.id}.sh` : null;

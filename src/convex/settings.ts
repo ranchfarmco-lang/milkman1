@@ -18,7 +18,25 @@ const TOGGLE_KEYS = new Set([
   "keep_screen_awake",
   "assistant_speak_up",
   "ai_auto_refresh",
+  // Whether the models running on this machine are asked before anything on
+  // the internet. A choice about order, not about a device — it lives here
+  // because every switch the Control Room flips is validated against this list,
+  // and because the assistant flips switches with the same call.
+  "local_ai_first",
   "vpn",
+  // The AI Builder's two switches: whether it works as the six-person crew,
+  // and whether it may reach the outside world (web_search, fetch_url, the
+  // other AI systems). Both are on until the Control Room takes them off.
+  "builder_crew",
+  "builder_research",
+  // The companion in the corner: how it hears them, whether it offers anything
+  // unasked, and whether it reads its answers out. The switch that turns the
+  // microphone on is a setting rather than local state on purpose — it is the
+  // one thing about the little box that has to survive a reload, and to be the
+  // same on the phone and the laptop.
+  "companion_hands_free",
+  "companion_hints",
+  "companion_speak",
 ]);
 
 /**

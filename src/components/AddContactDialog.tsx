@@ -6,6 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useHubAddress } from "@/lib/hub-address";
 import { copyText } from "@/lib/internal-share";
 import { cn } from "@/lib/utils";
 import { Check, Copy, Link2, UserPlus } from "lucide-react";
@@ -28,9 +29,7 @@ export function AddContactDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const [copied, setCopied] = useState(false);
-
-  const address =
-    typeof window === "undefined" ? "" : `${window.location.origin}/`;
+  const address = useHubAddress();
 
   const copyInvite = async () => {
     if (await copyText(address)) {

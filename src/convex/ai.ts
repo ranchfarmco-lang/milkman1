@@ -1,8 +1,21 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { internal } from "./_generated/api";
+import { v } from "convex/values";
+import { api, internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { action, query, type ActionCtx } from "./_generated/server";
+import {
+  action,
+  query,
+  type ActionCtx,
+  type QueryCtx,
+} from "./_generated/server";
 import type { Agent } from "./ai_prompts";
+import { lockedMessage } from "./guard";
+import {
+  isLoopback,
+  makeRelay,
+  type HttpResult,
+  type Relay,
+} from "./localRelays";
 import type { TraceStepKind } from "./schema";
 
 /**
@@ -531,6 +544,42 @@ const OPENAI_PROVIDERS: {
   },
 ];
 
+/**
+ * Where each system hands out the key that turns it on.
+ *
+ * A variable name is not something a person can act on: it says what to paste
+ * and never where to get it. Every system this hub knows is therefore paired
+ * with the page that issues its key, so the Control Room's "waiting" list can
+ * be followed rather than only read. Kept as one map keyed by the variable, so
+ * a system added to the roster needs no second edit to become reachable.
+ */
+const SIGNUP: Record<string, string> = {
+  OPENAI_API_KEY: "https://platform.openai.com/api-keys",
+  ANTHROPIC_API_KEY: "https://console.anthropic.com/settings/keys",
+  GOOGLE_API_KEY: "https://aistudio.google.com/app/apikey",
+  GROQ_API_KEY: "https://console.groq.com/keys",
+  OPENROUTER_API_KEY: "https://openrouter.ai/keys",
+  DEEPSEEK_API_KEY: "https://platform.deepseek.com/api_keys",
+  XAI_API_KEY: "https://console.x.ai",
+  CEREBRAS_API_KEY: "https://cloud.cerebras.ai",
+  MISTRAL_API_KEY: "https://console.mistral.ai/api-keys",
+  TOGETHER_API_KEY: "https://api.together.ai/settings/api-keys",
+  SAMBANOVA_API_KEY: "https://cloud.sambanova.ai/apis",
+  NVIDIA_API_KEY: "https://build.nvidia.com/settings/api-keys",
+  HF_TOKEN: "https://huggingface.co/settings/tokens",
+  GITHUB_MODELS_TOKEN: "https://github.com/settings/personal-access-tokens",
+  DASHSCOPE_API_KEY: "https://bailian.console.alibabacloud.com",
+  ZAI_API_KEY: "https://z.ai/manage-apikey/apikey-list",
+  CHUTES_API_KEY: "https://chutes.ai/app/api",
+  MOONSHOT_API_KEY: "https://platform.moonshot.ai/console/api-keys",
+  FIREWORKS_API_KEY: "https://fireworks.ai/account/api-keys",
+  NEBIUS_API_KEY: "https://studio.nebius.com/settings/api-keys",
+  HYPERBOLIC_API_KEY: "https://app.hyperbolic.xyz/settings",
+  CLOUDFLARE_API_TOKEN: "https://dash.cloudflare.com/profile/api-tokens",
+  POLLINATIONS_API_KEY: "https://pollinations.ai",
+  AI_BASE_URL: "https://platform.openai.com/docs/api-reference",
+};
+
 type Provider = {
   /** The slug an agent names when it wants this one: "groq", "gemini". */
   id: string;
@@ -552,6 +601,16 @@ type Provider = {
   keyEnv?: string;
   /** One line for the Control Room, saying what this connection is. */
   note?: string;
+  /**
+   * How a system on this machine is asked: through a page of the hub that is
+   * open over there, because `127.0.0.1` from a data centre is a data centre.
+   *
+   * Set only by an action, which is the one place with a context to carry the
+   * question in and the answer out. A query has no such context, so a query's
+   * providers have none — and a model call made without one says so plainly
+   * rather than dialling an address that will never answer.
+   */
+  relay?: Relay;
 };
 
 /**
@@ -568,12 +627,18 @@ type Provider = {
  * the Control Room reads it. What it fails with is named in `classifyFailure`
  * rather than passed on as a status code.
  *
- * The two at the front of the list are models running on the machine the
- * backend runs on, and they are the best kind of free there is: no quota, no
- * rate limit, nothing leaving the house. They are tried first because when one
- * is there it is a real model answering in milliseconds — and when one is not
- * there the connection is refused in a millisecond too, so a hub with no model
- * server running pays almost nothing for the look. Anywhere else at all is
+ * The two at the front of the list are models running on the family's own
+ * machine, and they are the best kind of free there is: no quota, no rate
+ * limit, nothing leaving the house. They are tried first because when one is
+ * there it is a real model answering in milliseconds.
+ *
+ * They are never asked from here, though. `127.0.0.1` means "this machine", and
+ * this deployment's server is not the family's machine — so asking it from a
+ * data centre always ended in `tcp connect error: Connection refused`, a
+ * failure that said nothing about whether a model was sitting on the desk all
+ * along. The question goes out through a page of the hub open on that machine
+ * instead (see `localRelays.ts`), and a model server that is not running is
+ * refused there, in milliseconds, by the machine that would know. Anywhere else at all is
  * reachable with AI_BASE_URL and AI_API_KEY, which is the freedom this list
  * cannot cover and does not pretend to.
  */
@@ -598,7 +663,7 @@ const FREE_SYSTEMS: {
     // A guess, and only ever a guess: whatever is missing from it is discovered
     // from the server itself on the same question.
     models: ["llama3.2", "qwen2.5-coder:7b", "mistral"],
-    note: "Free and private: whatever this machine has pulled. `ollama serve`, then `ollama pull llama3.2`, and the hub finds it on the next question.",
+    note: "Free and private: whatever this machine has pulled. `ollama serve`, then `ollama pull llama3.2`. The hub asks it through a page of itself open on that machine — never from the hub's own server, which is a different machine entirely.",
   },
   {
     id: "localllm",
@@ -607,7 +672,7 @@ const FREE_SYSTEMS: {
     baseUrl: "http://127.0.0.1:1234/v1",
     // Nothing is guessed: the server is asked what it is serving.
     models: [],
-    note: "The same idea at LM Studio's usual address — llama.cpp, vLLM, LM Studio and the brain's own serve-local-model script all answer here. Any other address goes in AI_BASE_URL with AI_API_KEY set to any text.",
+    note: "The same idea at LM Studio's usual address — llama.cpp, vLLM, LM Studio and the brain's own serve-local-model script all answer here, asked through a page of the hub open on that machine. Any other address goes in AI_BASE_URL with AI_API_KEY set to any text.",
   },
   {
     id: "pollinations",
@@ -730,7 +795,10 @@ function firstSet(names: string[]): string | null {
  * of them may be consulted; and a system that stops answering hands the
  * question down the line on its own.
  */
-function resolveProviders(): Provider[] {
+function resolveProviders(
+  relay?: Relay | null,
+  preferLocal?: boolean,
+): Provider[] {
   const found: Provider[] = [];
 
   // 1. Anything you point at yourself — a local model, a proxy, a provider we
@@ -865,11 +933,29 @@ function resolveProviders(): Provider[] {
     }
   }
 
+  // Carried on every system built here, so a fallback further down the line
+  // asks a machine on the family's desk exactly the way the leader does —
+  // without each model call having to be handed a context of its own.
+  if (relay) for (const provider of found) provider.relay = relay;
+
   // The order a conversation follows, decided once and in one place: best
   // first, and the question moves down the list only when a system cannot
   // answer at all. Consulting, reviewing and nudging all read this same list,
   // so what answers a question is what answers a review of it.
   found.sort((a, b) => a.rank - b.rank);
+
+  // The family can ask for the models on their own machine to lead — free,
+  // private, and in the house — whichever systems have keys. It is a change of
+  // order rather than a second list: the same systems, the same ranks, only
+  // moved. A system named in AI_LEAD still wins, because naming one by hand is
+  // the more specific thing to have asked for.
+  if (preferLocal) {
+    const local = found.filter((one) => isLoopback(one.baseUrl));
+    if (local.length) {
+      const away = found.filter((one) => !isLoopback(one.baseUrl));
+      found.splice(0, found.length, ...local, ...away);
+    }
+  }
 
   // Two variables naming the same company are one system, not two.
   const seenId = new Set<string>();
@@ -917,8 +1003,11 @@ function withLead(
 }
 
 /** The system that leads the conversation. */
-function resolveProvider(): Provider | null {
-  return resolveProviders()[0] ?? null;
+function resolveProvider(
+  relay?: Relay | null,
+  preferLocal?: boolean,
+): Provider | null {
+  return resolveProviders(relay, preferLocal)[0] ?? null;
 }
 
 /**
@@ -939,6 +1028,12 @@ export const configured = query({
   handler: async () => resolveProviders().length > 0,
 });
 
+/** Whether this person has asked for the models on their own machine to lead. */
+async function prefersLocal(ctx: QueryCtx | ActionCtx): Promise<boolean> {
+  const values = await ctx.runQuery(api.settings.get, {});
+  return values.local_ai_first === true;
+}
+
 /**
  * Which systems are reachable right now, for the Control Room. Names and lines
  * only — never a key, and never which key is a real one. The order is the same
@@ -946,8 +1041,10 @@ export const configured = query({
  */
 export const systems = query({
   args: {},
-  handler: async () => {
-    return resolveProviders().map((provider) => ({
+  handler: async (ctx) => {
+    const localFirst = await prefersLocal(ctx);
+
+    return resolveProviders(undefined, localFirst).map((provider) => ({
       id: provider.id,
       label: provider.label,
       free: Boolean(provider.free),
@@ -956,6 +1053,8 @@ export const systems = query({
       keyEnv: provider.keyEnv ?? null,
       models: provider.models.slice(0, 4),
       note: provider.note ?? "",
+      /** Whether it runs on this machine, and so has to be asked through a page. */
+      local: isLoopback(provider.baseUrl),
     }));
   },
 });
@@ -986,6 +1085,8 @@ export const catalog = query({
       envVars: string[];
       note: string;
       models?: string[];
+      /** The page that issues the key, when there is one. */
+      signup?: string;
     }) => {
       const connected = live.get(input.id);
       return {
@@ -998,6 +1099,8 @@ export const catalog = query({
         connected: Boolean(connected),
         /** Which variable switched it on, when one did. Never its value. */
         keyEnv: connected?.keyEnv ?? null,
+        /** Where to get the key that brings this one online. */
+        signup: input.signup ?? SIGNUP[input.envVars[0] ?? ""] ?? null,
         models: (connected?.models ?? input.models ?? []).slice(0, 4),
       };
     };
@@ -1090,6 +1193,17 @@ const HEALTH_TTL_MS = 30_000;
 let healthCache: { at: number; rows: SystemHealth[] } | null = null;
 
 /**
+ * How long one system may be walked while the lights are being read.
+ *
+ * Shorter than a turn's own walk on purpose: a check is a knock on the door,
+ * and a box that spends a minute and a half on one doorway while somebody is
+ * watching it is worse than a fast, honest "not answering". A system that
+ * answers does so in milliseconds; the budget only ever covers a system that
+ * is not there.
+ */
+const HEALTH_WALK_BUDGET_MS = 25_000;
+
+/**
  * A different handful of characters on every probe.
  *
  * It matters more than it looks. A free public system caches identical prompts,
@@ -1124,51 +1238,43 @@ export const checkSystems = action({
       return healthCache.rows;
     }
 
-    const rows = await Promise.all(
-      resolveProviders().map(async (provider): Promise<SystemHealth> => {
-        const started = Date.now();
-        let detail = "It did not answer.";
+    // Knocking on a local model server's door from here would only ever find
+    // this machine's own loopback, so the question goes out through a page of
+    // the hub on the family's machine — which means the refresh button is also
+    // the one place that proves the page over there is open and listening.
+    const relay = makeRelay(ctx, userId);
+    const localFirst = await prefersLocal(ctx);
 
-        // A system that declares no models — a local server whose contents
-        // only the server itself knows — is asked what it is serving, rather
-        // than being reported as dead for having nothing to guess with. It is
-        // the difference between "not answering" and "not asked".
-        let models = modelsFor(provider, "assistant");
-        if (!models.length) {
-          const discovered = await discoverModel(provider);
-          models = discovered ? [discovered] : [];
-        }
-        if (!models.length) {
+    const rows = await Promise.all(
+      resolveProviders(relay, localFirst).map(async (provider): Promise<SystemHealth> => {
+        const started = Date.now();
+
+        // The same walk a real question makes, rather than a stricter one:
+        // every model this system is known for, and — when all of them turn
+        // out to be missing — asking the server itself what it serves and
+        // trying that. It matters most for a model server on this machine, and
+        // it is found by name here: a machine running Ollama with a different
+        // model pulled used to be shown as not answering while it was in fact
+        // answering every real question put to it.
+        const models = modelsFor(provider, "assistant");
+        const asked = await askOneSystem(
+          provider,
+          models,
+          "You are a connection test. Reply with the single word: ok",
+          [{ role: "user", text: `say ok ${probeId()}` }],
+          0,
+          16,
+          HEALTH_WALK_BUDGET_MS,
+        );
+
+        if (asked.ok) {
           return {
             id: provider.id,
             label: provider.label,
-            ok: false,
+            ok: true,
             ms: Date.now() - started,
-            detail: "It did not answer, and it would not say which models it serves — so there was nothing to ask it.",
+            detail: "Answered",
           };
-        }
-
-        for (const model of models) {
-          const asked = await askOnce(
-            provider,
-            model,
-            "You are a connection test. Reply with the single word: ok",
-            [{ role: "user", text: `say ok ${probeId()}` }],
-            0,
-            16,
-          );
-
-          if (asked.ok) {
-            return {
-              id: provider.id,
-              label: provider.label,
-              ok: true,
-              ms: Date.now() - started,
-              detail: "Answered",
-            };
-          }
-
-          detail = asked.error.slice(0, 200);
         }
 
         return {
@@ -1176,13 +1282,90 @@ export const checkSystems = action({
           label: provider.label,
           ok: false,
           ms: Date.now() - started,
-          detail,
+          // A model server on this machine that never named a model is the one
+          // failure worth a sentence of its own: this deployment cannot ask it
+          // directly, so the page carrying the question out is the only way to
+          // find out, and that is what the person needs to be told.
+          detail:
+            !models.length && isLoopback(provider.baseUrl)
+              ? "It would not say which models it serves, and this page is the only way to ask — so either no model server is running on that machine, or this browser is not letting the page reach it."
+              : asked.error.slice(0, 400),
         };
       }),
     );
 
     healthCache = { at: Date.now(), rows };
     return rows;
+  },
+});
+
+/**
+ * One question, one answer — the builder's crew talking to the hub's models.
+ *
+ * The crew runs in the browser and writes its files into the browser's own
+ * sandbox, but the models it thinks with live here, on the deployment, behind
+ * the keys this hub already has. That is the point of this action: it is the
+ * door for a walk with no provider of its own — no key to paste in the Control
+ * Room, no local model server to start. The same first-choice-then-fallback
+ * walk a chat turn makes happens inside it, so a hub whose only key was just
+ * revoked, or whose one provider is having an afternoon, still answers.
+ *
+ * It is deliberately plain: a system prompt, one message, and the text back.
+ * No tools, no thread, no history — the crew holds its own context and asks
+ * again when it needs to. `maxTokens` is clamped so a stuck model cannot hold
+ * the action open past its own limit, and a locked account is refused before a
+ * single key is spent.
+ */
+export const complete = action({
+  args: {
+    system: v.string(),
+    prompt: v.string(),
+    maxTokens: v.optional(v.number()),
+    temperature: v.optional(v.number()),
+  },
+  handler: async (
+    ctx,
+    { system, prompt, maxTokens, temperature },
+  ): Promise<
+    { ok: true; text: string; by: string } | { ok: false; error: string }
+  > => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return { ok: false, error: "Sign in to build." };
+
+    // A held-out account may not spend the family's keys, exactly as a chat
+    // turn may not: this is the same question `access.unlocked` exists to
+    // answer, and the sentence it is refused with is the guard's own — which
+    // knows whether this hub has a password to answer or a device the owner
+    // has taken away.
+    if (!(await ctx.runQuery(internal.access.unlocked, {}))) {
+      return { ok: false, error: lockedMessage() };
+    }
+
+    const relay = makeRelay(ctx, userId);
+    const localFirst = await prefersLocal(ctx);
+    const provider = resolveProvider(relay, localFirst);
+    if (!provider) {
+      return {
+        ok: false,
+        error:
+          "Every AI system is switched off. The Control Room lists all of them and the exact variable each needs — paste any one of those in the Keys tab, or turn the free public systems back on.",
+      };
+    }
+
+    const budget = Math.min(Math.max(Math.round(maxTokens ?? 4096), 64), 8192);
+    const asked = await askModel(
+      provider,
+      modelsFor(provider, "builder"),
+      system.slice(0, 24000),
+      [{ role: "user", text: prompt.slice(0, 60000) }],
+      temperature ?? 0.4,
+      budget,
+    );
+
+    if (asked.ok) {
+      return { ok: true, text: asked.text, by: asked.by ?? provider.label };
+    }
+    return { ok: false, error: asked.error };
   },
 });
 
@@ -1382,6 +1565,50 @@ async function fetchWithTimeout(
 }
 
 /**
+ * One request to one system — and the difference between a system on the
+ * internet and a system on the family's desk, settled here rather than at
+ * every call site.
+ *
+ * A model server on `127.0.0.1` answers only the machine it is listening on.
+ * This deployment is a server in a data centre, so asking it from here has
+ * always ended in `tcp connect error: Connection refused` — an address that
+ * means something different on each machine, and never the same thing. The
+ * browser *is* the family's machine, so when an action has a relay the question
+ * goes through a page of the hub over there and the answer comes back with it.
+ *
+ * With no relay in hand — a query, or an action nobody is watching — the
+ * request still goes out the ordinary way, because a deployment that runs beside
+ * its own model server (or a proxy pointed at deliberately) must keep working.
+ * What it never does is report a refused connection as though it were a fault:
+ * for an address on this machine that reads as what it actually is.
+ */
+async function sendRequest(
+  provider: Provider,
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<HttpResult> {
+  if (provider.relay && isLoopback(url)) {
+    return await provider.relay.send({
+      label: provider.label,
+      url,
+      headers: (init.headers ?? {}) as Record<string, string>,
+      body: String(init.body ?? ""),
+      timeoutMs,
+    });
+  }
+
+  try {
+    return await fetchWithTimeout(url, init, timeoutMs);
+  } catch (error) {
+    if (!isLoopback(url)) throw error;
+    throw new Error(
+      `${provider.label} is running on the family's own machine, and this deployment's server is not that machine — asking it from here is what produced "connection refused". Open the hub in a browser on that machine, so a page of it can carry the question over, and ask again.`,
+    );
+  }
+}
+
+/**
  * Ask again when the failure is the kind that passes.
  *
  * A busy queue, a gateway flashing a 502 and a request the clock ran out on all
@@ -1390,12 +1617,12 @@ async function fetchWithTimeout(
  * reader's problem. A dropped connection gets exactly one more go, because
  * repeating a long wait is worse than moving on to the next model.
  */
-async function sendingWithRetries(
-  send: () => Promise<Response>,
+async function sendingWithRetries<T extends { status: number }>(
+  send: () => Promise<T>,
   retries = TRANSIENT_RETRIES,
-): Promise<Response> {
+): Promise<T> {
   for (let attempt = 0; ; attempt += 1) {
-    let response: Response;
+    let response: T;
     try {
       response = await send();
     } catch (error) {
@@ -1670,7 +1897,14 @@ async function callOpenAi(
   // Live first, when somebody is watching. Everything below is the same ask
   // without streaming, which is also the fallback for every way the live
   // attempt can decline.
-  if (onDelta) {
+  //
+  // A system on this machine answers in one piece: the page carrying the
+  // question out has no way to hand a stream back through a row, so the live
+  // attempt is not made at all rather than made and failed. A loopback address
+  // with nobody to carry it is the same answer — there is nobody to stream
+  // from — and it keeps a refused connection inside the ordinary failure path
+  // below, where it is written out in words.
+  if (onDelta && !provider.relay && !isLoopback(chatUrl)) {
     const live = await streamOpenAi({
       chatUrl,
       provider,
@@ -1687,7 +1921,8 @@ async function callOpenAi(
   }
 
   const post = (withTools: boolean) =>
-    fetchWithTimeout(
+    sendRequest(
+      provider,
       chatUrl,
       {
         method: "POST",
@@ -1708,10 +1943,17 @@ async function callOpenAi(
       budget,
     );
 
-  let response: Response;
+  let response: HttpResult;
   let detail = "";
   try {
-    response = await sendingWithRetries(() => post(specs.length > 0));
+    // A relayed question is already a queue of its own: the row was opened, a
+    // page picked it up, and the machine over there had its full budget. Asking
+    // twice would mean waiting out both of them again, so a relay goes once and
+    // hands back whatever came back.
+    response = await sendingWithRetries(
+      () => post(specs.length > 0),
+      provider.relay ? 0 : TRANSIENT_RETRIES,
+    );
     if (!response.ok) detail = await response.text();
 
     // An endpoint that refuses the `tools` field outright is asked again the
@@ -1832,7 +2074,8 @@ async function callGemini(
   maxTokens: number,
 ): Promise<CallResult> {
   const send = () =>
-    fetchWithTimeout(
+    sendRequest(
+      provider,
       `${provider.baseUrl}/${model}:generateContent`,
       {
         method: "POST",
@@ -1849,7 +2092,7 @@ async function callGemini(
       modelTimeout(maxTokens),
     );
 
-  let response: Response;
+  let response: HttpResult;
   try {
     response = await sendingWithRetries(send);
   } catch (error) {
@@ -1930,9 +2173,14 @@ function askOnce(
  */
 async function discoverModel(provider: Provider) {
   try {
-    const response = await fetchWithTimeout(`${provider.baseUrl}/models`, {
-      headers: authHeaders(provider),
-    });
+    const response = await sendRequest(
+      provider,
+      `${provider.baseUrl}/models`,
+      { headers: authHeaders(provider) },
+      // Asking what a local server serves is a directory read, not a model
+      // call: it gets room to travel and to be carried across, and no more.
+      provider.relay ? 15_000 : FETCH_TIMEOUT_MS,
+    );
     if (!response.ok) return null;
 
     const data = (await response.json()) as { data?: { id?: unknown }[] };
@@ -2079,7 +2327,9 @@ async function askModel(
   // A fallback answers in the same job the question was asked of, so the
   // builder's models are used when it was the builder asking.
   const agent = agentForPrompt(system) ?? "assistant";
-  const others = resolveProviders().filter((one) => one.id !== provider.id);
+  const others = resolveProviders(provider.relay).filter(
+    (one) => one.id !== provider.id,
+  );
 
   // Three other keyed systems, and then — whatever happened — the ones that
   // need no key at all. A hub whose only key was just revoked, or whose one
@@ -2142,6 +2392,16 @@ type ToolCall =
   | { name: "read_family"; limit: number | null }
   | { name: "read_briefing"; section: string | null }
   | { name: "read_rundown"; days: number | null }
+  | {
+      name: "install_box";
+      title: string;
+      url: string;
+      pipeline: string | null;
+      filter: string | null;
+      town: string | null;
+      why: string | null;
+    }
+  | { name: "remove_box"; title: string }
   | { name: "list_ai" }
   | { name: "ask_ai"; system: string; model: string | null; question: string }
   | { name: "act"; actions: unknown[] }
@@ -2193,11 +2453,25 @@ const BUILDER_TOOLS = new Set<ToolCall["name"]>([
  * tools to offer. A review, a consultation or a nudge carries neither line and
  * so is offered none — those only ever rewrite text.
  */
+/**
+ * Which of the two agents a set of instructions belongs to.
+ *
+ * It is read off the first line because that is the one thing a prompt always
+ * begins with, and it decides two things that fail silently: whether the model
+ * is handed any tools at all, and which models the fallback walk asks when the
+ * leader does not answer.
+ *
+ * The companion in the corner is named here as an assistant on purpose. It is
+ * the same brain and the same shelf of tools — it is only on every page instead
+ * of on one — and a prompt that maps to nothing is a model handed an empty tool
+ * list, which is a little box that can only talk.
+ */
 function agentForPrompt(system: string): Agent | null {
   if (system.includes("You are the AI Builder")) return "builder";
   if (system.includes("You are the voice of a hands-free assistant")) {
     return "assistant";
   }
+  if (system.includes("You are the companion")) return "assistant";
   return null;
 }
 
@@ -2348,6 +2622,43 @@ const VOICE_TOOL_SPECS = [
         properties: {
           days: num("How many days ahead to read, 1 to 60. Seven by default."),
         },
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "install_box",
+      description:
+        "Install a new box on the [LIVE] page: a feed, a sale board, an events calendar or a page the hub reads itself and draws on the wall, next to the board's own boxes. Give it a name, the http address, and the pipeline that reads it — rss for a news feed, sales for a classifieds or garage-sale feed, events for an events feed or calendar page, feed for a plain page read line by line. Optionally keep only rows matching a word. The hub fetches it now and again on its own timer, and the box stays until they ask for it to come down. Use it whenever they say to put something on the board, watch a page, or add a box.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: str("What to call the box, in their words — short"),
+          url: str("The http or https address the hub should fetch"),
+          pipeline: str(
+            "How to read it — rss, sales, events or feed. Defaults to rss.",
+          ),
+          filter: str("Optional: keep only rows containing this word or phrase"),
+          town: str("Optional: the hometown this box belongs to"),
+          why: str("Optional: why it was installed, in one line"),
+        },
+        required: ["title", "url"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "remove_box",
+      description:
+        "Take an installed box down from the [LIVE] page again, by the name it is shown under.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: str("The box's name, as it appears on the board"),
+        },
+        required: ["title"],
       },
     },
   },
@@ -2532,8 +2843,14 @@ const BENCH_TOOL_SPECS = [
 
 function toolSpecsFor(system: string) {
   const agent = agentForPrompt(system);
-  if (agent === "builder") return [...VOICE_TOOL_SPECS, ...BENCH_TOOL_SPECS];
-  if (agent === "assistant") return VOICE_TOOL_SPECS;
+  // The bench is the assistant's as well as the builder's now: it was the
+  // builder's alone, and the assistant is meant to reach everything — the same
+  // files, the same tools, the same sandbox. Only the agents' own prompts reach
+  // this — the spoken assistant, the companion in the corner and the builder —
+  // so a review, a consultation or a nudge still gets nothing.
+  if (agent === "builder" || agent === "assistant") {
+    return [...VOICE_TOOL_SPECS, ...BENCH_TOOL_SPECS];
+  }
   return [];
 }
 
@@ -2689,6 +3006,27 @@ function parseToolCall(text: string): ToolCall | null {
         name,
         days: days === null ? null : Math.min(60, Math.max(1, Math.floor(days))),
       };
+    }
+    if (name === "install_box" && typeof parsed.url === "string") {
+      const text = (value: unknown, limit: number) =>
+        typeof value === "string" && value.trim()
+          ? value.trim().slice(0, limit)
+          : null;
+      return {
+        name,
+        title:
+          typeof parsed.title === "string" && parsed.title.trim()
+            ? parsed.title.trim().slice(0, 60)
+            : "A new box",
+        url: parsed.url.trim().slice(0, 500),
+        pipeline: text(parsed.pipeline, 20),
+        filter: text(parsed.filter, 60),
+        town: text(parsed.town, 40),
+        why: text(parsed.why, 160),
+      };
+    }
+    if (name === "remove_box" && typeof parsed.title === "string") {
+      return { name, title: parsed.title.trim().slice(0, 60) };
     }
     if (name === "list_ai") {
       return { name };

@@ -17,11 +17,20 @@
  * of the app that cannot regenerate its own snapshot is a copy that cannot
  * build.
  */
+import { api } from "@/convex/_generated/api";
+import type { ConvexReactClient } from "convex/react";
 import { PACKAGE_BINARY_FILES, PACKAGE_FILES } from "./offline-brain-files";
 import { zipBlob, type ZipEntry } from "./zip";
 
 /** Every file the app is made of: repo-relative path → its text. */
 export type SourceMap = Record<string, string>;
+
+/** What both sources hand back: the live hub's copy, or the shipped one. */
+export type SourceResult = {
+  at: string;
+  files: SourceMap;
+  patched?: string[];
+};
 
 /** What `api.backup.data` hands back: table name → rows, plus honest notes. */
 export type HubBackup = {
@@ -108,6 +117,11 @@ export function sourceAsText(files: SourceMap, at: string) {
  * The snapshot deliberately leaves itself out — a file cannot contain its own
  * final contents — so a backup would otherwise be missing the module the
  * Builder reads from. Rebuilding it from the same map restores the copy whole.
+ *
+ * `SELF_OMITTED` is always empty here, and that is correct rather than lazy:
+ * the cap that names omitted files lives in `bun run snapshot:self`, and the
+ * files it left out are not in this archive either. A restored copy therefore
+ * has nothing missing from it, and says so.
  */
 export function renderSelfSource(files: SourceMap, at: string) {
   const ordered = Object.fromEntries(
@@ -126,8 +140,126 @@ export function renderSelfSource(files: SourceMap, at: string) {
 
 export const SELF_SNAPSHOT_AT = ${JSON.stringify(at)};
 
+/** Paths the cap kept out of this snapshot, if any. */
+export const SELF_OMITTED: string[] = [];
+
 export const SELF_SOURCE: Record<string, string> = ${JSON.stringify(ordered, null, 2)};
 `;
+}
+
+/**
+ * The same map as `renderSelfSource`, as the JSON twin a restored copy serves
+ * from `public/`. Both halves have to be put back, or the restored app would
+ * have the module the Builder reads but no `self-source.json` for the browser
+ * to fall back on when the database will not answer.
+ */
+export function renderShippedSource(files: SourceMap, at: string) {
+  const ordered = Object.fromEntries(
+    Object.keys(files)
+      .sort()
+      .map((path) => [path, files[path]]),
+  );
+
+  return JSON.stringify({ at, omitted: [], files: ordered });
+}
+
+/* ------------------------------------ the source, a page at a time ---------- */
+
+/**
+ * How much source one trip across the wire may carry, in characters.
+ *
+ * The snapshot is about four megabytes. Taken in one query that is a single
+ * four-megabyte answer the browser has to hold whole — and one that Convex
+ * re-sends from scratch the moment the Builder writes a file. Taken through
+ * `api.backup.sourcePage` it is a queue of capped pages the caller drains at
+ * its own pace, which is what keeps a download working on a slow link and
+ * keeps a page from having to hold the whole app at once before it can start.
+ *
+ * The backend clamps this to its own ceiling, so asking high here asks for
+ * nothing extra — it is the intended page size, not a limit.
+ */
+export const SOURCE_PAGE_CHARS = 180_000;
+
+/**
+ * The pause between pages. Small enough to be invisible in the total time, and
+ * enough to hand the browser a frame between megabytes so a progress note can
+ * actually be read and the tab stays responsive while the funnel drains.
+ */
+const PAGE_PAUSE_MS = 40;
+
+const wait = (ms: number) =>
+  new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+
+/**
+ * Pull the whole source through the funnel: one capped page after another,
+ * until the backend says the walk is done.
+ *
+ * `onProgress` is called with the running file count after every page, so a
+ * panel can say what it is doing instead of going quiet for a second.
+ */
+export async function readSource(
+  convex: ConvexReactClient,
+  onProgress?: (files: number, total: number) => void,
+): Promise<SourceResult> {
+  const files: SourceMap = {};
+  let at = "";
+  let patched: string[] = [];
+  let cursor: string | undefined;
+
+  // A page of one file that never ends must not be able to spin this: every
+  // page is at least one file further along than the one before it.
+  let lastCount = -1;
+
+  for (;;) {
+    const page = await convex.query(api.backup.sourcePage, {
+      cursor,
+      chars: SOURCE_PAGE_CHARS,
+    });
+
+    at = page.at;
+    patched = page.patched;
+    Object.assign(files, page.files);
+
+    const count = Object.keys(files).length;
+    onProgress?.(count, page.total);
+    if (count <= lastCount) break;
+    lastCount = count;
+
+    if (page.cursor === null) break;
+    cursor = page.cursor;
+    await wait(PAGE_PAUSE_MS);
+  }
+
+  return { at, files, patched };
+}
+
+/**
+ * The copy that ships beside the page, fetched rather than imported.
+ *
+ * This is the fallback for when the database will not answer, so it has to work
+ * with the backend down — but it must not be *bundled*, because a four-megabyte
+ * TypeScript module in the app's graph is exactly what takes a small machine's
+ * bundler over the edge. A file in `public/` is served untouched, so the app
+ * still carries its own source without that megabyte ever being parsed.
+ */
+export async function readShippedSource(): Promise<SourceResult> {
+  const response = await fetch("/self-source.json", { cache: "no-cache" });
+  if (!response.ok) {
+    throw new Error(
+      `The copy of the app shipped beside this page is not being served (${response.status}).`,
+    );
+  }
+
+  const twin = (await response.json()) as {
+    at?: string;
+    files?: SourceMap;
+  };
+
+  if (!twin || typeof twin.at !== "string" || typeof twin.files !== "object") {
+    throw new Error("The copy of the app shipped beside this page is unreadable.");
+  }
+
+  return { at: twin.at, files: twin.files, patched: [] };
 }
 
 /* -------------------------------------------------------- the hub's data */
@@ -381,6 +513,12 @@ The hub's backend, for running it without depending on anyone else's deployment.
 This is the official open-source Convex backend and dashboard — the same code
 the hosted service runs — packaged so the hub can point at it.
 
+This kit runs it in **containers**, for a machine that stays on. If you would
+rather have no Docker in the way at all, the folder beside this one does the
+same job with nothing but Bun: see \`../self-hosting/README.md\` and run
+\`bun run own\` from the app folder. Both end with a backend nobody else can
+switch off, and you can move between them at any time.
+
 ## The one command
 
 From the app folder — the one above this — run:
@@ -413,8 +551,17 @@ private key, so keep it to yourself and do not commit it.
     "INSTALL.md": `# Running the hub on your own computer
 
 This folder is a complete copy of the hub's app — the same code the live hub
-runs — plus three small files that build and serve it locally. It needs
-**Docker** and nothing else.
+runs — plus a few small files that build and serve it locally.
+
+There are two ways to run it, and the first needs nothing but Bun:
+
+- **One command, no Docker, no account** — from the folder above this one,
+  \`cd app && bun run own\`. It brings its own Convex backend, keeps the whole
+  database in \`app/.convex/local/default/\` (copy that folder and you have
+  backed the hub up), and serves it at <http://localhost:8080>. Nothing outside
+  the machine can pause it. The runbook is \`app/self-hosting/README.md\`;
+  section 6 below is the short version.
+- **Docker** — sections 1 to 5, for a server that stays on.
 
 ## 1. Install Docker (once)
 
@@ -477,9 +624,34 @@ without this app.
 Out of the box this copy talks to the hub's Convex database (the address in
 VITE_CONVEX_URL). While that database is up that is the simplest thing — but it
 means the copy you own still needs someone else's deployment to sign you in.
-There are two ways to make it yours, and either one removes that.
+There are three ways to make it yours, and any one of them removes that.
 
-### Your own Convex project (easiest)
+### This machine, nothing else (easiest — no Docker, no account)
+
+    cd app
+    bun run own
+
+It downloads and runs Convex's own backend as an ordinary program on this
+computer, pushes the hub's schema and every function into it, makes the signing
+keys the first sign-in needs, sets the family password, and builds and serves
+the hub against it. None of it asks anything of any service: no account, no
+card, no Docker. The whole database ends up as a folder — copying
+\`app/.convex/local/default/\` anywhere is the whole of backing the hub up.
+
+Run it again to start it again: the backend, the data, the keys and the password
+are left exactly as they are. Options, all optional:
+
+    HUB_PASSWORD='the-password-you-share' bun run own   # require the family password
+    OWN_PORT=9000 bun run own                           # serve somewhere else
+
+The full runbook — including what to do when the newest backend build needs a
+newer C library than this machine has — is \`app/self-hosting/README.md\`. To put
+an existing snapshot of the family's data into it,
+\`bun run restore -- <snapshot.zip>\`: it aims the import at this machine's own
+backend by name and refuses to run when that backend is not answering, so it
+cannot be aimed at somebody else's deployment by mistake.
+
+### Your own Convex project
 
 Still a hosted service, but the deployment is yours, not anyone else's:
 
@@ -583,7 +755,13 @@ function backupReadme(input: BackupInput, root: string) {
     parts.push(
       `- \`app/\` — the whole app: ${paths.length} files, every page and function.`,
       "  It is a real project: `bun install` then `bun run dev` in that folder",
-      "  runs it, and `app/INSTALL.md` shows how to run it with Docker.",
+      "  runs it, and `app/INSTALL.md` shows how to run it on your own machine.",
+      "- **`cd app && bun run own`** — the whole hub on this computer with no",
+      "  Docker and no account: its own Convex backend, its own database in",
+      "  `app/.convex/local/default/`, served at <http://localhost:8080>. Nothing",
+      "  outside the machine can pause it. `app/self-hosting/README.md` is the",
+      "  runbook, and `app/self-hosting/restore.sh` puts an existing snapshot of",
+      "  the family's data into that backend.",
       "- `app/Dockerfile`, `app/docker-compose.yml`, `app/nginx.conf` — build and",
       "  serve it on your own computer with `docker compose up --build`.",
     );
@@ -602,10 +780,12 @@ function backupReadme(input: BackupInput, root: string) {
     const brainPaths = Object.keys(input.brain.files);
     const brainBytes = Object.keys(input.brain.binary ?? {});
     parts.push(
-      `- \`offline-ai-coding-brain/\` — the local edition: the Python brain, every installer${brainBytes.length ? ` and the Freebuff reference source archive (${brainPaths.length} files)` : ` (${brainPaths.length} files)`}.`,
+      `- \`offline-ai-coding-brain/\` — the local edition: the Python brain, every installer${brainBytes.length ? ` and its two archives — the Freebuff reference source and this app's own source (${brainPaths.length} files)` : ` (${brainPaths.length} files)`}.`,
       "  `python3 brain/brain.py serve` inside it starts the brain; the hub's Local",
       "  Brain page pairs with it once and becomes a view of it. Nothing in there",
-      "  is fetched while it installs: the source is unpacked from the archive.",
+      "  is fetched while it installs: both archives are unpacked off the drive,",
+      "  and `scripts/capture-this-app.sh` puts this app itself at",
+      "  `offline-ai-coding-brain/source/app/`.",
     );
     if (input.brain.missing.length) {
       parts.push(
@@ -618,8 +798,10 @@ function backupReadme(input: BackupInput, root: string) {
     "",
     "## Restoring it",
     "",
-    "- **The code:** copy `app/` into a project folder and work with it there, or",
-    "  run it as-is with Docker (see `app/INSTALL.md`).",
+    "- **The code:** copy `app/` into a project folder and work with it there.",
+    "  To run it as it is — no Docker, no account, nothing outside the machine —",
+    "  `cd app && bun run own` (see `app/self-hosting/README.md`); with Docker,",
+    "  `docker compose up --build` (see `app/INSTALL.md`).",
     input.includeData
       ? "- **The data:** `bunx convex import` reads `data/hub-data.json`; the" +
         " steps are in `app/INSTALL.md`."
@@ -627,8 +809,10 @@ function backupReadme(input: BackupInput, root: string) {
     "",
     "## Honest notes",
     "",
-    "- The copy is a snapshot: it is the code as it was when the backup was",
-    "  taken, not a live link to the project.",
+    "- The copy is a snapshot, not a live link to the project: it is this app",
+    "  as it stands — the app's own copy, plus only AI Builder changes made",
+    "  after that copy was taken. An older working file can never replace",
+    "  newer code in it.",
     "- Packages are not bundled (no `node_modules`), so the first build fetches",
     "  them. A lockfile is not included either, so versions resolve fresh.",
     input.includeData && input.data?.notes.length
@@ -659,6 +843,12 @@ export function backupZip(input: BackupInput) {
     entries.push({
       path: `${root}/app/src/convex/self_source.ts`,
       data: renderSelfSource(input.files, input.at),
+    });
+    // …and its twin, so the restored copy can still fall back on its own source
+    // when the database is down.
+    entries.push({
+      path: `${root}/app/public/self-source.json`,
+      data: renderShippedSource(input.files, input.at),
     });
     for (const [name, text] of Object.entries(linuxKit(input.convexUrl))) {
       entries.push({ path: `${root}/app/${name}`, data: text });
@@ -736,9 +926,10 @@ export async function offlineBrainZip(
   const lines = [
     `# offline-ai-coding-brain — the local edition, packed ${stampOf(at)}`,
     "",
-    "The Python brain, every installer and the Freebuff reference source",
-    "archive, exactly as the hub serves them. Nothing here is fetched while it",
-    "installs: the installers unpack the source archive that is in this folder.",
+    "The Python brain, every installer and both source archives — the Freebuff",
+    "reference implementation and this app itself — exactly as the hub serves",
+    "them. Nothing here is fetched while it installs: the installers unpack the",
+    "archives that are in this folder.",
     "",
     "## Start here (a terminal, in this folder)",
     "",
@@ -748,7 +939,9 @@ export async function offlineBrainZip(
     "",
     "Then open the hub's Local Brain page and paste the address and token once.",
     "Models are fetched by GET-EVERYTHING.sh; set MODEL_SET=small first for a",
-    "laptop-sized download.",
+    "laptop-sized download. The hub's own app, whole, is in this archive too:",
+    "unpack it with `bash scripts/capture-this-app.sh` and it lands at",
+    "`source/app/`.",
     "",
   ];
   if (missing.length) {

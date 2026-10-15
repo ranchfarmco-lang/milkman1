@@ -1,3 +1,4 @@
+import { splitCrew } from "@/convex/ai_crew";
 import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
@@ -8,9 +9,19 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-/** One line of a turn's working: a thought, a step, or something that broke. */
+/**
+ * One line of a turn's working: a thought, a step, what a program printed, or
+ * something that broke.
+ */
 export type FeedStep = {
-  kind: "reasoning" | "think" | "tool" | "step" | "answer" | "error";
+  kind:
+    | "reasoning"
+    | "think"
+    | "tool"
+    | "step"
+    | "answer"
+    | "error"
+    | "console";
   text: string;
   at: number;
 };
@@ -153,7 +164,25 @@ function FeedLine({ step, writing }: { step: FeedStep; writing: boolean }) {
     );
   }
 
-  // A step it took: short, one line, with a mark to walk down.
+  // What a program printed — a build's own output, or a run's. Verbatim, in a
+  // mono block: it is machine output rather than something written for a
+  // person, and reflowing it in the proportional font would hide what the error
+  // actually said.
+  if (step.kind === "console") {
+    return (
+      <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-md border border-border/50 bg-background/50 px-2 py-1.5 font-mono text-[10px] leading-4 text-muted-foreground">
+        {step.text}
+        {caret}
+      </pre>
+    );
+  }
+
+  // A step it took: short, one line, with a mark to walk down — and, when this
+  // box works as a crew, the crew member it belongs to. The handle is on the
+  // front of the line because the server put it there; splitting it off here is
+  // what turns "@Files Looked over its bench" into a badge and a sentence.
+  const { handle, body } = splitCrew(step.text);
+
   return (
     <p className="flex items-start gap-2 text-[11px] leading-5 text-foreground/80">
       <span
@@ -163,7 +192,12 @@ function FeedLine({ step, writing }: { step: FeedStep; writing: boolean }) {
         )}
       />
       <span className="min-w-0 break-words">
-        {step.text}
+        {handle ? (
+          <span className="mr-1.5 inline-block rounded border border-border/70 bg-background/50 px-1 py-px align-[1px] font-mono text-[9px] text-foreground/85">
+            {handle}
+          </span>
+        ) : null}
+        {body}
         {caret}
       </span>
     </p>

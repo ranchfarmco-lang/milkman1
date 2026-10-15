@@ -1,0 +1,50 @@
+# What the container build does not need to carry.
+#
+# `COPY . .` in the Dockerfile copies this folder, so anything large, private or
+# irrelevant should be named here. Two of these matter beyond speed: the family's
+# own backup (`backups/`) and the local Convex state (`.convex/`) hold private
+# data, and neither belongs in an image.
+#
+# `convex_local_storage/` is the same kind of thing — the local backend's own
+# files, modules and exports, eleven megabytes of this machine's storage with no
+# database in the repository to read it back. Named for the same reason as the
+# two above it.
+node_modules
+dist
+.vly-run
+.convex
+convex_local_storage
+backups
+.env
+.env.*
+!.env.example
+
+# Generated downloads of the source tree — what *saving* this project produces,
+# not what it is made of. Left in place they are packed into the build context
+# and then into the next archive, which is how a 21 MB context becomes 42.
+# `**/` is spelled out because Docker treats a bare `*` as not crossing a
+# directory separator, unlike git — where the same two lines mean the same thing
+# anyway, and where the exception below is already written for the same reason.
+**/*.zip
+**/*.tar.gz
+
+# ...except the two archives the app actually serves: every download on the
+# Offline Brain page carries them and the installer unpacks both, so a built hub
+# without them would offer buttons that produce nothing — and `bun run
+# test:this-app` reads them straight out of `public/`, so a context that left
+# them out could not even be checked. Both have to be named by hand:
+# `**/*.zip` above excludes every zip, and a negation is the only way back in.
+# (`.gitignore` keeps the same two exceptions, for the same reason.)
+!public/offline-brain/source/freebuff-source.zip
+!public/offline-brain/source/this-app-source.zip
+
+# The vendored reference tree the offline brain documents (~81 MB, including
+# ripgrep binaries): a reference, never compiled. `public/offline-brain/` — the
+# part that ships — is kept.
+offline-ai-coding-brain
+
+# These three are read at *build* time, so they stay: `src/lib/sugar-native.ts`
+# packs the whole native host into the Web Portal's download with Vite's
+# `import.meta.glob`, and the same source is what the AI Builder reads. They are
+# under a megabyte between them, which is cheaper than a button that does nothing.
+#   native/  os/  sugar-browser/

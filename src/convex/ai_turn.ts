@@ -21,17 +21,21 @@ import {
   REVIEW_PROMPT,
   assistantSystemPrompt,
   builderSystemPrompt,
+  companionSystemPrompt,
   reviewUserMessage,
   type Agent,
 } from "./ai_prompts";
+import { crewForTool, tagCrew, type CrewId } from "./ai_crew";
+import { isKnownVoiceId, voiceLabel } from "../lib/voices";
 import { patchOwnCode, readOwnCode, shortPath } from "./ai_self";
 import { briefingDigest, briefingSections } from "./briefing";
+import { boxesDigest } from "./live_boxes";
 import { runProgram, type BuildReport } from "./sandbox";
 import { roomValidator } from "./schema";
+import { makeRelay } from "./localRelays";
 import {
   BROWSER_UA,
   BUILDER_TOKENS,
-  BUILDER_TOOLS,
   CHAT_TOKENS,
   CONTEXT,
   FALLBACK_TOKENS,
@@ -268,8 +272,7 @@ async function searchHackerNews(query: string) {
 
     const lines = hits.slice(0, 5).map((hit) => {
       const link =
-        hit.url ??
-        `https://news.ycombinator.com/item?id=${hit.objectID ?? ""}`;
+        hit.url ?? `https://news.ycombinator.com/item?id=${hit.objectID ?? ""}`;
       const meta = [
         hit.points ? `${hit.points} points` : "",
         hit.num_comments ? `${hit.num_comments} comments` : "",
@@ -332,7 +335,6 @@ const COMPILER_TTL_MS = 10 * 60_000;
 
 let compilerCache: { at: number; names: string[] } | null = null;
 
-
 async function compilerNames() {
   if (compilerCache && Date.now() - compilerCache.at < COMPILER_TTL_MS) {
     return compilerCache.names;
@@ -361,17 +363,17 @@ function newestVersion(names: string[]) {
   const score = (name: string) =>
     (name.match(/\d+/g) ?? []).map(Number).slice(0, 3);
 
-  return ([
-    ...names,
-  ].sort((a, b) => {
-    const left = score(a);
-    const right = score(b);
-    for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
-      const diff = (right[i] ?? 0) - (left[i] ?? 0);
-      if (diff !== 0) return diff;
-    }
-    return 0;
-  })[0] ?? null);
+  return (
+    [...names].sort((a, b) => {
+      const left = score(a);
+      const right = score(b);
+      for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
+        const diff = (right[i] ?? 0) - (left[i] ?? 0);
+        if (diff !== 0) return diff;
+      }
+      return 0;
+    })[0] ?? null
+  );
 }
 
 async function resolveCompiler(language: string) {
@@ -414,7 +416,10 @@ async function runCode(
       WANDBOX_RUN_URL,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
         body: JSON.stringify({
           compiler,
           code: code.slice(0, 20_000),
@@ -531,7 +536,9 @@ function describeBuild(report: BuildReport): string {
     parts.push(
       `No longer the app's own files (${report.changed.length}):\n${report.changed
         .map((one) => `- ${one}`)
-        .join("\n")}\n\nThose are the copy's changes, and they are what has to be carried into the real app by a person — nothing here can write to it, which is exactly why this is safe.`,
+        .join(
+          "\n",
+        )}\n\nThose are the copy's changes, and they are what has to be carried into the real app by a person — nothing here can write to it, which is exactly why this is safe.`,
     );
   }
 
@@ -776,6 +783,12 @@ const SETTING_LABELS: Record<string, string> = {
   fullscreen: "fullscreen",
   screen_rotation: "screen rotation",
   keep_screen_awake: "keep-awake",
+  local_ai_first: "local AI first",
+  builder_crew: "the builder's crew",
+  builder_research: "the builder's outside world",
+  companion_hands_free: "the companion's hands-free microphone",
+  companion_hints: "the companion's hints",
+  companion_speak: "the companion reading its answers out",
 };
 
 /** Plain english for what just happened, stored with the reply. */
@@ -800,8 +813,12 @@ function describeAction(action: AssistantAction) {
     }
     case "tell_family":
       return "Shared it with your family";
-    case "set_voice":
-      return `Changed my voice to ${asString(action.voice)}`;
+    case "set_voice": {
+      const wanted = asString(action.voice).trim().toLowerCase();
+      return isKnownVoiceId(wanted)
+        ? `Changed my voice to ${voiceLabel(wanted)}`
+        : "Changed my voice";
+    }
     case "set_setting": {
       const on = action.on !== false;
       const key = asString(action.key);
@@ -901,10 +918,30 @@ async function reviewAnswer(args: {
 /* ------------------------------------------------------------------ handler */
 
 export const respond = action({
-  args: { room: roomValidator },
+  args: {
+    room: roomValidator,
+    /**
+     * What is on the screen, for the little box that follows the person around.
+     * Written by the page (route, heading, the field being typed in, anything
+     * selected) and only ever used by the companion's prompt. It is a digest,
+     * not a picture — nothing in this hub captures the screen.
+     */
+    context: v.optional(v.string()),
+    /**
+     * Which job this turn is, when the box itself knows.
+     *
+     * `"self"` is the mirror in the AI Builder's sandbox: the person is
+     * changing the app they are looking at rather than asking for a new one,
+     * and the builder is told so. It is that box's whole reason for existing —
+     * the same builder, the same bench, the other target — so it travels with
+     * the turn rather than being guessed from the words somebody happened to
+     * type.
+     */
+    focus: v.optional(v.literal("self")),
+  },
   handler: async (
     ctx,
-    { room },
+    { room, context, focus },
   ): Promise<
     | { ok: true; say: string; actions: AssistantAction[] }
     | { ok: false; error: string }
@@ -933,7 +970,17 @@ export const respond = action({
       return { ok: false as const, error };
     };
 
-    const providers = resolveProviders();
+    // A model on the family's own machine is asked through a page of the hub
+    // open over there, so every provider built for this turn can reach it —
+    // the leader and every fallback down the line alike. The same row holds
+    // the Control Room's two builder switches: the crew, and the outside world.
+    const settings = await ctx.runQuery(api.settings.get, {});
+    const localFirst = settings.local_ai_first === true;
+    /** On unless the Control Room has taken it off. */
+    const crew = settings.builder_crew !== false;
+    /** On unless the Control Room has taken it off. */
+    const research = settings.builder_research !== false;
+    const providers = resolveProviders(makeRelay(ctx, userId), localFirst);
     const provider = providers[0] ?? null;
     if (!provider) {
       return giveUp(
@@ -943,12 +990,18 @@ export const respond = action({
 
     const agent: Agent = room === "builder" ? "builder" : "assistant";
     const isAssistant = agent === "assistant";
+    /**
+     * Whether this box answers in the spoken shape — words plus actions —
+     * rather than the builder's prose-and-code. The companion is the
+     * Assistant's family: same envelope, same review, same actions.
+     */
+    const chatty = isAssistant || room === "companion";
 
     tracer.step("step", "Reading the thread");
     const history = await ctx.runQuery(internal.messages.history, {
       room,
       ownerId: userId,
-      limit: isAssistant ? CONTEXT.assistant : CONTEXT.builder,
+      limit: chatty ? CONTEXT.assistant : CONTEXT.builder,
     });
     if (history.length === 0) {
       return giveUp("Nothing to reply to yet.");
@@ -965,28 +1018,46 @@ export const respond = action({
       timeStyle: "short",
     });
 
-    const system = isAssistant
-      ? assistantSystemPrompt({
-          name: profile.name,
-          memories,
-          now,
-          canConsult: true,
-        })
-      : builderSystemPrompt({
-          name: profile.name,
-          memories,
-          now,
-          canConsult: true,
-        });
+    const system =
+      room === "companion"
+        ? companionSystemPrompt({
+            name: profile.name,
+            memories,
+            now,
+            canConsult: true,
+            screen: context,
+          })
+        : isAssistant
+          ? assistantSystemPrompt({
+              name: profile.name,
+              memories,
+              now,
+              canConsult: true,
+            })
+          : builderSystemPrompt({
+              name: profile.name,
+              memories,
+              now,
+              canConsult: true,
+              crew,
+              research,
+              self: focus === "self",
+            });
 
     const models = modelsFor(provider, agent);
     // Loose for conversation, precise for code.
-    const temperature = isAssistant ? 0.9 : 0.5;
-    const maxTokens = isAssistant ? CHAT_TOKENS : BUILDER_TOKENS;
+    const temperature = chatty ? 0.9 : 0.5;
+    // The little box is read at a glance, so it is given the shorter ceiling.
+    const maxTokens =
+      room === "companion"
+        ? FALLBACK_TOKENS
+        : chatty
+          ? CHAT_TOKENS
+          : BUILDER_TOKENS;
 
     const question =
-      [...history].reverse().find((message) => message.role === "user")
-        ?.text ?? "";
+      [...history].reverse().find((message) => message.role === "user")?.text ??
+      "";
 
     /* ------------------------------------------------- talk, look, act */
 
@@ -1004,10 +1075,29 @@ export const respond = action({
      * One call writes both, which is the point of it: the note a person reads
      * afterwards and the line they watched go by are the same sentence, so the
      * pane cannot drift into describing a turn that did not happen.
+     *
+     * The step into the pane is attributed to whichever crew member the tool
+     * that produced it belongs to — worked out from what actually ran, never
+     * from a claim the model makes. The note under the reply stays plain: it is
+     * a summary of the turn, not a roster call.
      */
-    const did = (line: string) => {
+    /** Which tool the loop is currently on, for attributing a line to the crew. */
+    let currentTool: string | null = null;
+
+    const did = (line: string, crew?: CrewId | null) => {
       notes.push(line);
-      tracer.step("tool", line);
+      const id =
+        crew !== undefined
+          ? crew
+          : currentTool
+            ? crewForTool(currentTool)
+            : null;
+      tracer.step(
+        "tool",
+        // The crew is the builder's — and only while the Control Room has the
+        // crew switch on. The assistant's pane stays as it was.
+        isAssistant || !crew ? line : tagCrew(id, line),
+      );
     };
 
     /** Store an action the page will carry out when the reply lands. */
@@ -1043,8 +1133,8 @@ export const respond = action({
       });
       did(
         changed.ok
-          ? `Changed my voice to ${id}`
-          : "I do not have a voice by that name",
+          ? `Changed my voice to ${changed.label}`
+          : "I do not have a voice by that name — the eight are Ava, Scarlett, Colette, Giulia, Valentina, Isabela, Sasha and Priya",
       );
     };
 
@@ -1139,6 +1229,9 @@ export const respond = action({
         answer = result.text;
         break;
       }
+      // Every line this tool writes into the pane is attributed to the crew
+      // member whose job that tool is.
+      currentTool = toolCall.name;
 
       let toolResult = "";
 
@@ -1314,10 +1407,6 @@ export const respond = action({
             ? "Built the replica of this app and it passed"
             : "Built the replica of this app and it failed",
         );
-      } else if (isAssistant && BUILDER_TOOLS.has(toolCall.name)) {
-        // The voice has no bench, and it is never told these tools exist.
-        toolResult =
-          "That tool belongs to the AI Builder, not to you. Answer with what you have.";
       } else if (toolCall.name === "web_search") {
         toolResult = await webSearch(toolCall.query);
         did(`Looked up “${toolCall.query.slice(0, 60)}”`);
@@ -1337,6 +1426,8 @@ export const respond = action({
           now,
           canConsult: false,
           askedBy: agent,
+          crew,
+          research,
         });
 
         const consulted = await askModel(
@@ -1385,7 +1476,7 @@ export const respond = action({
               .join(", ") +
             ".";
         } else {
-          toolResult = briefingDigest(board.updatedAt, board.data, toolCall.section);
+          toolResult = `${briefingDigest(board.updatedAt, board.data, toolCall.section)}\n\n${await boxesDigest(ctx)}`;
         }
         did("Read the [LIVE] board");
       } else if (toolCall.name === "read_rundown") {
@@ -1410,6 +1501,8 @@ ${calendar}
 
 The [LIVE] board, read just now:
 ${live}
+
+${await boxesDigest(ctx)}
 
 Give them their rundown: today first — the date and the time, what is on, and what the weather and any alerts are doing — then everything coming up after that. Read the entries and the readings out rather than summarizing the numbers away.`;
         did("Read the calendar and the [LIVE] board");
@@ -1474,6 +1567,43 @@ Give them their rundown: today first — the date and the time, what is on, and 
         }
 
         toolResult = "Done. Those are carried out as soon as you answer.";
+      } else if (toolCall.name === "install_box") {
+        // A box of their own on the [LIVE] page: installed first, then read, so
+        // the assistant can tell them what it found rather than what it hopes.
+        try {
+          const made = await ctx.runAction(api.live_boxes.install, {
+            title: toolCall.title,
+            url: toolCall.url,
+            pipeline: toolCall.pipeline ?? undefined,
+            filter: toolCall.filter ?? undefined,
+            town: toolCall.town ?? undefined,
+            why: toolCall.why ?? undefined,
+          });
+
+          const found = made.ok
+            ? `It answered: ${made.rows.map((row) => row.title).join(" · ")}`
+            : `It was installed, but the feed did not answer yet: ${made.error}`;
+          toolResult = `“${made.title}” is now a box on the [LIVE] page, read with the ${made.pipeline} pipeline from ${made.source || toolCall.url}. ${found} The hub will read it again every hour, and it stays there until they ask for it to come down.`;
+          did(`Installed “${made.title}” on the [LIVE] board`);
+        } catch (error) {
+          toolResult = `That box could not be installed: ${
+            error instanceof Error
+              ? error.message
+              : "it would not go on the board."
+          } Say so plainly and ask for a different address if they have one.`;
+        }
+      } else if (toolCall.name === "remove_box") {
+        const gone = await ctx.runMutation(api.live_boxes.removeByTitle, {
+          title: toolCall.title,
+        });
+        toolResult = gone
+          ? `“${gone}” has been taken down from the [LIVE] page.`
+          : `There is no box called “${toolCall.title}” on the [LIVE] page right now.`;
+        did(
+          gone
+            ? `Took “${gone}” off the [LIVE] board`
+            : "No such box to remove",
+        );
       }
 
       conversation = [
@@ -1485,6 +1615,9 @@ Give them their rundown: today first — the date and the time, what is on, and 
         },
       ];
     }
+
+    // The loop is over; anything written from here belongs to nobody's tool.
+    currentTool = null;
 
     if (!answer) {
       tracer.step("step", "Out of tool rounds — asking for the answer");
@@ -1508,7 +1641,7 @@ Give them their rundown: today first — the date and the time, what is on, and 
 
     /* ----------------------------------------------------------- finish */
 
-    if (isAssistant) {
+    if (chatty) {
       const parsed = parseAssistantReply(answer);
       if (!parsed.say) {
         return giveUp("The model returned an empty answer.");
@@ -1566,9 +1699,10 @@ Give them their rundown: today first — the date and the time, what is on, and 
       // sent through the act tool along the way.
       const carried = Array.from(
         new Map(
-          [...pendingActions, ...actions.filter((one) => !isServerAction(one))].map(
-            (one) => [JSON.stringify(one), one],
-          ),
+          [
+            ...pendingActions,
+            ...actions.filter((one) => !isServerAction(one)),
+          ].map((one) => [JSON.stringify(one), one]),
         ).values(),
       ).slice(0, MAX_ACTIONS);
 
@@ -1608,7 +1742,7 @@ Give them their rundown: today first — the date and the time, what is on, and 
       });
       written = reviewed.text;
       if (reviewed.fixed) {
-        did(`Checked itself and fixed: ${reviewed.fixed}`);
+        did(`Checked itself and fixed: ${reviewed.fixed}`, "review");
       }
     }
 
@@ -1636,6 +1770,228 @@ Give them their rundown: today first — the date and the time, what is on, and 
   },
 });
 
+/* ------------------------------------------------------------------- hints */
+
+/**
+ * The note that marks a line in the little box as one nobody asked for.
+ *
+ * It is written under the line as well as counted in the database, which is
+ * deliberate: the person can see at a glance which lines they asked for and
+ * which the hub volunteered, and the box's own badge counts them.
+ */
+const HINT_NOTE = "Spoke up on its own";
+
+/**
+ * The least time between two lines offered unasked.
+ *
+ * The page waits before asking and will not ask twice for one route; this is
+ * the backstop underneath it, for a person moving quickly from page to page
+ * across several tabs. Three minutes is short enough to be useful and long
+ * enough that the companion reads as company rather than as a ticker.
+ */
+const HINT_GAP_MS = 3 * 60 * 1000;
+
+/**
+ * The instruction for the little box speaking first.
+ *
+ * The whole of it turns on one thing: silence is allowed, and is better than
+ * noise. A model asked to say something useful will always find something; a
+ * companion that does that on every page is the reason people turn features
+ * like this off. So the empty answer is named as a real answer, first, and the
+ * bar for speaking is set high: it must be about what is in front of them, and
+ * it must be something they could not guess.
+ */
+const HINT_PROMPT = `You are the companion in the corner of this family's own app, and you are about to speak first: nobody has asked you anything. What you are given is what is on their screen, what you remember about them, and whatever was last said in this box.
+
+Decide whether there is one thing genuinely worth their attention — right now, about the thing in front of them. A hint about the page they have just opened, something they would want to know, the single next step on the work they are halfway through, or a question worth asking. Warm, quick, a little sassy, glad to be useful, one to three short sentences.
+
+Say nothing at all when there is nothing like that. Their screen and their memory are usually enough to guess at something, but a guess is not worth interrupting them for, and repeating what was already said in this box is worse than silence.
+
+Rules: no markdown, no lists, no emoji, no headings. Never remark that you can see their screen, never say you were watching, never mention being an AI, a model or a program. Never ask for attention, never apologise for speaking, never say you will stay quiet. Never repeat a line you already said in the last few messages below.
+
+If there is nothing worth saying, reply with exactly this and nothing else:
+{"say":"","actions":[]}
+
+Otherwise reply with exactly one JSON object and nothing else:
+{"say":"what goes in the little box, and out loud if they are hands-free","actions":[]}`;
+
+/**
+ * The companion speaking first.
+ *
+ * It is the plain counterpart to `nudge`: that one exists for a real alert — a
+ * timer that has gone off — and this one for everything else the little box is
+ * allowed to volunteer. What keeps it from being a nuisance is written down in
+ * three places rather than hoped for: the page waits before asking and asks
+ * once per route, this action refuses inside `HINT_GAP_MS` of the last line it
+ * offered, and the prompt itself is allowed to answer with nothing.
+ *
+ * It writes into the companion's own thread, so a hint is read in the same
+ * column as the conversation and is remembered in the same history — which is
+ * what stops it being said twice.
+ */
+/**
+ * The line out of a hint, read strictly.
+ *
+ * Everywhere else a reply is taken forgivingly — an answer wrapped in a
+ * sentence is still the answer. Here it is not: this line was not asked for, so
+ * the only thing that earns the interruption is a model that plainly meant to
+ * say something. Prose, a refusal, or a shape that will not parse is treated as
+ * silence, which is the answer the prompt offers anyway.
+ */
+function hintedLine(raw: string): string | null {
+  const trimmed = raw.trim();
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start === -1 || end <= start) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed.slice(start, end + 1)) as {
+      say?: unknown;
+    };
+    const say = typeof parsed.say === "string" ? parsed.say.trim() : "";
+    return say || null;
+  } catch {
+    return null;
+  }
+}
+
+export const hint = action({
+  args: {
+    /** What just happened, in one line: which page, and that they asked nothing. */
+    why: v.string(),
+    /** What is on their screen, written by the page. Absent means nothing was. */
+    context: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    { why, context },
+  ): Promise<{ ok: true; say: string } | { ok: false; error: string }> => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return { ok: false, error: "Sign in first" };
+
+    const localFirst =
+      (await ctx.runQuery(api.settings.get, {})).local_ai_first === true;
+    const provider = resolveProvider(makeRelay(ctx, userId), localFirst);
+    if (!provider) return { ok: false, error: "No AI key yet" };
+
+    const [profile, memories, timing, said] = await Promise.all([
+      ctx.runQuery(internal.family.profile, { userId }),
+      ctx.runQuery(internal.memories.context, { userId }),
+      ctx.runQuery(internal.messages.unpromptedTiming, {
+        room: "companion",
+        ownerId: userId,
+        note: HINT_NOTE,
+      }),
+      ctx.runQuery(internal.messages.history, {
+        room: "companion",
+        ownerId: userId,
+        limit: 8,
+      }),
+    ]);
+
+    // Said something a moment ago. Nothing is spent, and nothing is said.
+    if (
+      timing.lastUnpromptedAt !== null &&
+      Date.now() - timing.lastUnpromptedAt < HINT_GAP_MS
+    ) {
+      return { ok: false, error: "Spoke up a moment ago" };
+    }
+
+    const now = new Date().toLocaleString("en-GB", {
+      timeZoneName: "short",
+      dateStyle: "full",
+      timeStyle: "short",
+    });
+
+    const notes = [
+      `Right now it is ${now}.`,
+      `Why you are considering speaking up: ${why.trim().slice(0, 300) || "they have just arrived somewhere"}`,
+      profile.name ? `Their name is ${profile.name}.` : "",
+      memories.length
+        ? `Things you remember about them:\n- ${memories.join("\n- ")}`
+        : "You do not remember anything about them yet.",
+      context
+        ? `What is on their screen right now, written down by the page they are on:\n${context.slice(0, 1200)}`
+        : "You cannot see their screen this moment.",
+      said.length
+        ? `The last few things in this little box, oldest first:\n${said
+            .slice(-6)
+            .map(
+              (message) =>
+                `${message.role === "user" ? "They" : "You"}: ${message.text.slice(0, 400)}`,
+            )
+            .join("\n")}`
+        : "Nothing has been said in this box yet — this would be the first thing in it.",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    // The decision is written down before it is made, so the choice to speak up
+    // — and what it was based on — is visible while it is being taken rather
+    // than only after a line appears.
+    const deciding = await ctx.runMutation(internal.ai_behind.open, {
+      source: "hint",
+      label: "Considering a word about the page in front of them",
+      detail: `${why.trim().slice(0, 300) || "They have just arrived somewhere"} It is reading what is on their screen, what it remembers, and what was last said in the box — and it is allowed to decide there is nothing worth saying.`,
+      ownerId: userId,
+    });
+
+    const asked = await askModel(
+      provider,
+      modelsFor(provider, "assistant"),
+      HINT_PROMPT,
+      [{ role: "user", text: notes }],
+      0.95,
+      FALLBACK_TOKENS,
+    );
+
+    if (!asked.ok) {
+      await ctx.runMutation(internal.ai_behind.close, {
+        id: deciding,
+        status: "failed",
+        detail: asked.error,
+      });
+      return { ok: false, error: asked.error };
+    }
+
+    const say = hintedLine(asked.text) ?? "";
+
+    // Silence is an answer, and the common one. It is recorded as such rather
+    // than as a failure, because a companion that says nothing when there is
+    // nothing to say is working exactly as intended.
+    if (!say) {
+      await ctx.runMutation(internal.ai_behind.close, {
+        id: deciding,
+        status: "done",
+        detail: [
+          asked.reasoning?.trim(),
+          "Nothing worth interrupting them for.",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      });
+      return { ok: false, error: "Nothing worth saying" };
+    }
+
+    await ctx.runMutation(internal.messages.appendReply, {
+      room: "companion",
+      ownerId: userId,
+      text: say,
+      note: HINT_NOTE,
+    });
+
+    await ctx.runMutation(internal.ai_behind.close, {
+      id: deciding,
+      status: "done",
+      detail: [asked.reasoning?.trim(), `Said: ${say}`]
+        .filter(Boolean)
+        .join("\n\n"),
+    });
+
+    return { ok: true, say };
+  },
+});
+
 /* ------------------------------------------------------------------ nudges */
 
 /**
@@ -1658,7 +2014,9 @@ export const nudge = action({
     const userId = await getAuthUserId(ctx);
     if (userId === null) return { ok: false, error: "Sign in first" };
 
-    const provider = resolveProvider();
+    const localFirst =
+      (await ctx.runQuery(api.settings.get, {})).local_ai_first === true;
+    const provider = resolveProvider(makeRelay(ctx, userId), localFirst);
     if (!provider) return { ok: false, error: "No AI key yet." };
 
     const [profile, memories, pending] = await Promise.all([
@@ -1793,7 +2151,8 @@ function unique(items: string[]) {
 
 /** Code and long answers get a second look; one-liners do not need one. */
 function shouldReview(text: string, isAssistant: boolean) {
-  if ((process.env.AI_REVIEW ?? "").trim().toLowerCase() === "off") return false;
+  if ((process.env.AI_REVIEW ?? "").trim().toLowerCase() === "off")
+    return false;
   if (text.includes("```")) return true;
   if (!isAssistant) return text.length > 280;
   return text.length > 400;

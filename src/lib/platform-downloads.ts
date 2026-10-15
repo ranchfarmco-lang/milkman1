@@ -14,10 +14,12 @@
  *      Python 3 with venv, Node, uv, Bun, Deno, Rust, the compilers;
  *   2. the whole package beside it: the Python brain, every installer script,
  *      the tests and the documentation, all as real files;
- *   3. the archive of the Freebuff (Codebuff) reference source, which the
- *      package documents and the installers unpack from the drive — so a build
- *      that already carries every other component is not left reaching for
- *      this one;
+ *   3. the two archives the package documents and unpacks from the drive — the
+ *      Freebuff (Codebuff) reference source, and **the hub's own app**, every
+ *      file of it (see `scripts/pack-this-app.mjs`) — so a build that already
+ *      carries every other component is not left reaching for either, and the
+ *      person downloading a platform does not end up with the tools without
+ *      the application they belong to;
  *   4. a README naming, line by line, exactly what the bootstrap installs.
  *
  * As with every other download in the hub, the archive is assembled in the
@@ -206,7 +208,7 @@ export const PLATFORMS: Platform[] = [
     runs: "Anywhere Docker runs — a server, a NAS, a laptop",
     method: "source code and a Docker kit, built from the live app",
     software: [
-      { name: "The whole app", how: "every source file as text, straight from the running copy" },
+      { name: "The whole app", how: "every source file as text, straight from the running copy — and again as source/this-app-source.zip inside the offline brain package" },
       { name: "Dockerfile and compose file", how: "docker compose up --build serves it as it is" },
       { name: "The offline brain", how: "packed beside the app so a self-host can carry it too" },
     ],
@@ -732,6 +734,11 @@ export function platformReadme(
     "  itself, Apache-2.0, in this folder. `scripts/capture-freebuff-source.sh`",
     "  unpacks it onto the drive, so nothing here is fetched when you run the",
     "  installers.",
+    "- `source/this-app-source.zip` — **the hub's own app**: every page and Convex",
+    "  function, the shell, the desktop browser, the native host, NOVA OS and the",
+    "  docs, with the two generated halves of its own snapshot so the copy builds",
+    "  as it stands. `scripts/capture-this-app.sh` unpacks it to `source/app/`,",
+    "  where `bun run own` brings the whole hub up on this machine.",
     "",
     "## How much to download",
     "",
@@ -756,9 +763,9 @@ export function platformReadme(
   } else {
     lines.push(
       "Complete: every packaged file is in this archive — the brain, every",
-      "installer and the reference source archive — and the script beside this",
-      "README installs the software to run them. Nothing here has to be fetched",
-      "before it will work.",
+      "installer, this app's own source archive and the reference source",
+      "archive — and the script beside this README installs the software to run",
+      "them. Nothing here has to be fetched before it will work.",
       "",
     );
   }

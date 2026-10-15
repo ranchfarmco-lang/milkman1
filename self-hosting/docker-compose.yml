@@ -1,0 +1,89 @@
+# Sugar, self-hosted — the whole hub on a machine you control.
+#
+# Two halves, and both of them yours: the backend (the database, the functions,
+# sign-in, the security log, and file storage) and the app itself (every page
+# you see). Nothing here names a hosting company, and nothing here is required —
+# it is simply the shortest path from `docker compose up` to a Sugar that only
+# you can reach.
+#
+#   1. `bash self-hosting/setup.sh` does all of this for you, with the signing
+#      keys and the family password included. By hand:
+#   2. write `.env` in this folder from the template in `README.md` —
+#      `INSTANCE_SECRET` at least (`openssl rand -hex 32`), and `VITE_CONVEX_URL`
+#      if the hub is reached from other devices;
+#   3. `docker compose -f self-hosting/docker-compose.yml up -d --build`.
+#
+# The backend listens on 3210 (API) and 3211 (HTTP actions), the dashboard — which
+# administers the whole hub — on 6791 (loopback only, on purpose), and the app on
+# 8080. Keep them behind your VPN or a private address; do not publish them.
+
+services:
+  backend:
+    image: ghcr.io/get-convex/convex-backend:latest
+    restart: unless-stopped
+    ports:
+      - "3210:3210"
+      - "3211:3211"
+    environment:
+      # Signs the sessions this backend issues. Required, and required to stay
+      # the same: changing it invalidates every session already handed out.
+      # Generate with: openssl rand -hex 32
+      INSTANCE_SECRET: ${INSTANCE_SECRET:?set INSTANCE_SECRET in self-hosting/.env}
+      # The address the backend advertises to the dashboard and to clients.
+      CONVEX_CLOUD_ORIGIN: ${CONVEX_CLOUD_ORIGIN:-http://127.0.0.1:3210}
+      CONVEX_SITE_ORIGIN: ${CONVEX_SITE_ORIGIN:-http://127.0.0.1:3211}
+      # Where the hub's own functions read their secrets. These are the
+      # deployment's variables as well, which is what the app actually reads;
+      # `setup.sh` sets them through the CLI, and they are named here too so a
+      # restart with only this file still comes up complete.
+      HUB_PASSWORD: ${HUB_PASSWORD:-}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      JWKS: ${JWKS:-}
+      SITE_URL: ${SITE_URL:-}
+      # AI providers — all optional. With no key at all the assistant still
+      # answers on free public systems. Server-side only; the browser never sees
+      # any of them.
+      XAI_API_KEY: ${XAI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+      LIVEKIT_URL: ${LIVEKIT_URL:-}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
+      DAYTONA_API_KEY: ${DAYTONA_API_KEY:-}
+    volumes:
+      - convex-data:/convex/data
+
+  dashboard:
+    image: ghcr.io/get-convex/convex-dashboard:latest
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      # Keep this on the private side only. It administers the whole hub.
+      - "127.0.0.1:6791:6791"
+    environment:
+      NEXT_PUBLIC_DEPLOYMENT_URL: ${CONVEX_CLOUD_ORIGIN:-http://127.0.0.1:3210}
+
+  hub:
+    build:
+      context: ..
+      args:
+        # The address the *browser* connects to — the backend above, as the
+        # device reading the page sees it. For a hub on one machine that is
+        # 127.0.0.1; for one reached over a VPN it is the VPN name, which is
+        # what the phones need. Change it before the first build: Vite bakes it
+        # into the JavaScript, so setting it afterwards changes nothing.
+        VITE_CONVEX_URL: ${VITE_CONVEX_URL:-http://127.0.0.1:3210}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${HUB_PORT:-8080}:80"
+
+volumes:
+  convex-data:

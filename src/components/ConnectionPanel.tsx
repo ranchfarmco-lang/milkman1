@@ -3,7 +3,7 @@ import { useDeviceLink, usePageRate } from "@/hooks/use-connection";
 import { useSettings } from "@/hooks/use-settings";
 import { cn } from "@/lib/utils";
 import { useAction, useConvexConnectionState } from "convex/react";
-import { Loader2 } from "lucide-react";
+import { ChevronDown, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
 /** One AI system, as the server last found it. */
@@ -58,6 +58,10 @@ export function ConnectionPanel() {
   const { values } = useSettings();
   const [systems, setSystems] = useState<SystemHealth[] | null>(null);
   const [lookedAt, setLookedAt] = useState(0);
+  // Closed by default: the box sits under the preview and only opens when it is
+  // pressed, so the readings are there when they are wanted and out of the way
+  // the rest of the time.
+  const [open, setOpen] = useState(false);
 
   // The family's own switch governs whether the systems are checked by
   // themselves. It is theirs, so it is obeyed here too rather than bypassed by
@@ -65,7 +69,9 @@ export function ConnectionPanel() {
   const autoRefresh = values.ai_auto_refresh ?? true;
 
   useEffect(() => {
-    if (!autoRefresh) return;
+    // Nothing is asked of a provider while the box is shut — it is not open to
+    // be read, so there is nothing worth spending tokens on.
+    if (!autoRefresh || !open) return;
 
     let alive = true;
 
@@ -93,17 +99,44 @@ export function ConnectionPanel() {
       alive = false;
       window.clearInterval(timer);
     };
-  }, [autoRefresh, checkSystems]);
+  }, [autoRefresh, open, checkSystems]);
 
   const socket = connection.isWebSocketConnected;
   const answering = systems?.filter((one) => one.ok).length ?? 0;
 
   return (
-    <div className="shrink-0 rounded-2xl border border-border/70 bg-card/70 px-3.5 py-2.5 backdrop-blur-sm">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] leading-4">
+    <div className="shrink-0 rounded-2xl border border-border/70 bg-card/70 backdrop-blur-sm">
+      {/* The one pressable row. Closed, it is all that shows; pressed, the
+          readings below appear. */}
+      <button
+        type="button"
+        onClick={() => setOpen((on) => !on)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 rounded-2xl px-3.5 py-2 text-left transition-colors hover:bg-white/5"
+      >
         <span className="text-[9px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
           Connection
         </span>
+        <span
+          className={cn(
+            "size-1.5 shrink-0 rounded-full",
+            socket ? "bg-emerald-400/80" : "bg-amber-400/80",
+          )}
+        />
+        <ChevronDown
+          className={cn(
+            "ml-auto size-3.5 shrink-0 text-muted-foreground transition-transform",
+            open ? "rotate-180" : "",
+          )}
+        />
+      </button>
+
+      <div
+        className={cn(
+          open ? "block px-3.5 pb-2.5" : "hidden",
+        )}
+      >
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] leading-4">
 
         <Reading
           label="Device"
@@ -181,6 +214,21 @@ export function ConnectionPanel() {
         </div>
       ) : null}
 
+      {/* "no answer" on its own is a dead end — the system's own reason is the
+          one thing that says what to do about it, so it is never swallowed. */}
+      {systems && systems.some((one) => !one.ok) ? (
+        <ul className="mt-1 space-y-0.5 text-[10px] leading-4">
+          {systems
+            .filter((one) => !one.ok)
+            .map((one) => (
+              <li key={one.id} className="text-muted-foreground">
+                <span className="text-foreground/80">{one.label}:</span>{" "}
+                {one.detail}
+              </li>
+            ))}
+        </ul>
+      ) : null}
+
       {systems === null && autoRefresh ? (
         <span className="mt-1 inline-flex items-center gap-1.5 text-[10px] text-muted-foreground">
           <Loader2 className="size-3 animate-spin" />
@@ -202,6 +250,7 @@ export function ConnectionPanel() {
           the systems appear here.
         </p>
       ) : null}
+      </div>
     </div>
   );
 }

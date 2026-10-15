@@ -272,6 +272,50 @@ export const assistantTiming = internalQuery({
 });
 
 /**
+ * When an unprompted line was last left in a box, and whether the person has
+ * said anything since.
+ *
+ * The companion in the corner is allowed to speak first, and the thing that
+ * makes that tolerable is that it never does it often. `oncePerSilence` in
+ * `appendReply` stops a single crowd of tabs turning one silence into three
+ * identical lines, but it deliberately resets the moment the person says
+ * anything — which is right for an alert and wrong for a hint. This is the
+ * other half: the plain clock, so a page-hopper cannot be talked at on every
+ * page they open.
+ */
+export const unpromptedTiming = internalQuery({
+  args: {
+    room: roomValidator,
+    ownerId: v.id("users"),
+    /** The note that marks a line as one nobody asked for. */
+    note: v.string(),
+  },
+  handler: async (ctx, { room, ownerId, note }) => {
+    // The same door as every other read a model is handed: a locked account
+    // gets nothing, so a hint spends no key on a hub nobody has unlocked.
+    if (!(await isUnlocked(ctx))) {
+      return { hasHistory: false, lastUserAt: null, lastUnpromptedAt: null };
+    }
+
+    const rows = await ctx.db
+      .query("messages")
+      .withIndex("by_room_owner", (q) =>
+        q.eq("room", room).eq("ownerId", ownerId),
+      )
+      .order("desc")
+      .take(30);
+
+    return {
+      hasHistory: rows.length > 0,
+      lastUserAt: rows.find((row) => row.role === "user")?.createdAt ?? null,
+      lastUnpromptedAt:
+        rows.find((row) => row.role === "assistant" && row.note === note)
+          ?.createdAt ?? null,
+    };
+  },
+});
+
+/**
  * Put something into the family's shared room — used when an AI shares a note
  * with the family for you. Without a family there is nobody to tell.
  */

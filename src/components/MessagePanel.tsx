@@ -2,7 +2,7 @@ import { BoxControlBar } from "@/components/BoxControlBar";
 import { TraceFeed, type FeedStep } from "@/components/TraceFeed";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { ChatRoom } from "@/hooks/use-chat";
+import type { BoxRoom } from "@/hooks/use-chat";
 import { useTrace } from "@/hooks/use-trace";
 import { splitArtifact, splitFences } from "@/lib/fences";
 import { HANDOFF_EVENT, takeHandoff } from "@/lib/internal-share";
@@ -25,6 +25,16 @@ export type ChatMessage = {
   mine: boolean;
   role: "user" | "assistant" | "member";
   authorName?: string | null;
+  /**
+   * When it was written, in milliseconds.
+   *
+   * The box that follows the person around puts its own notes — a timer that
+   * has gone off, something it just did — in the same column as the
+   * conversation, and that means merging two lists by the time each line
+   * happened. Every other panel keeps the order the thread arrived in and
+   * ignores this.
+   */
+  at?: number;
   /** What the assistant actually did, in plain english. */
   note?: string | null;
   /** The thinking and the steps behind an AI reply, kept with it. */
@@ -76,7 +86,7 @@ export type MessagePanelProps = {
   disabled?: boolean;
   /** Which box this is. The control bar in the top-right needs it to know where
    *  uploads land and where a share can go. Omit it and the box carries no bar. */
-  room?: ChatRoom;
+  room?: BoxRoom;
 };
 
 /**

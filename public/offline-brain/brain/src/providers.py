@@ -28,6 +28,7 @@ from __future__ import annotations
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
@@ -337,3 +338,101 @@ def ask_once(prompt: str, settings: Dict[str, Any], system: str = "") -> Dict[st
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
     return chat(messages, settings)
+
+
+def _known_ports(settings: Dict[str, Any]) -> set:
+    """The ports this machine's own model servers listen on."""
+    wanted = settings.get("localProviders") or LOCAL_SERVERS.keys()
+    ports = set()
+    for server_id in wanted:
+        spec = LOCAL_SERVERS.get(str(server_id))
+        if not spec:
+            continue
+        parsed = urllib.parse.urlparse(str(spec["base"]))
+        if parsed.port:
+            ports.add(int(parsed.port))
+    # LM Studio's second port, and Jan's — both loopback, both OpenAI-shaped.
+    ports.update({1234, 1337})
+    return ports
+
+
+def forward(
+    settings: Dict[str, Any],
+    url: str,
+    payload: Any,
+    headers: Optional[Dict[str, str]] = None,
+    timeout: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Pass one OpenAI-shaped request to a model server on *this* machine, and
+    hand back exactly what it answered — status and body untouched.
+
+    This is the route a hub page over https uses to reach a local model. The
+    page cannot ask one directly: it is a page from somewhere else, and a model
+    server that only accepts its own origins (Ollama's default) will not have it
+    — and even when it would, a browser has opinions about a secure page talking
+    to loopback. The brain is on loopback and refuses nothing, so the page asks
+    the brain and the brain asks the model from here, where neither rule exists.
+
+    The body comes back whole rather than as plain text on purpose: the hub's
+    agent reads `tool_calls` out of it, and a proxy that dropped those would be
+    a proxy the assistant could not act through.
+
+    Three things are refused before a byte leaves, because "ask the model" must
+    never turn into "fetch anything this machine can reach": the address has to
+    be on loopback, the port has to be one a model server here actually uses,
+    and the path has to be a chat route.
+    """
+    target = str(url or "").strip()
+    parsed = urllib.parse.urlparse(target)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme not in ("http", "https") or host not in ("127.0.0.1", "localhost", "::1"):
+        return {"ok": False, "status": 0, "error": "the brain only forwards to a model server on this machine"}
+
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    allowed = _known_ports(settings)
+    if port not in allowed:
+        return {
+            "ok": False,
+            "status": 0,
+            "error": f"no model server of this brain listens on port {port} (it listens on {', '.join(str(p) for p in sorted(allowed))})",
+        }
+
+    path = parsed.path.lower()
+    if not any(route in path for route in ("completion", "/chat", "/generate")):
+        return {"ok": False, "status": 0, "error": "the brain only forwards chat requests"}
+
+    raw = (
+        payload.encode("utf-8")
+        if isinstance(payload, str)
+        else json.dumps(payload).encode("utf-8")
+    )
+
+    request = urllib.request.Request(target, data=raw, method="POST")
+    request.add_header("Content-Type", "application/json")
+    request.add_header("Accept", "application/json")
+    # Only what a model call actually needs. A key for some other host has no
+    # business travelling to a server that never asked for one.
+    for key, value in (headers or {}).items():
+        if str(key).lower() in ("authorization", "x-api-key"):
+            request.add_header(str(key), str(value))
+
+    limit = float(timeout or settings.get("modelTimeout") or 600)
+    try:
+        with urllib.request.urlopen(request, timeout=limit) as response:
+            return {
+                "ok": True,
+                "status": int(response.status),
+                "body": response.read().decode("utf-8", errors="replace"),
+            }
+    except urllib.error.HTTPError as error:
+        # A refusal from the model server is an answer, not a failure of the
+        # relay: the hub reads the status and says what it means.
+        detail = ""
+        try:
+            detail = error.read().decode("utf-8", errors="replace")
+        except Exception:  # pragma: no cover - the body is a nicety, not a need
+            pass
+        return {"ok": True, "status": int(error.code), "body": detail}
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        return {"ok": False, "status": 0, "error": str(getattr(error, "reason", error))}

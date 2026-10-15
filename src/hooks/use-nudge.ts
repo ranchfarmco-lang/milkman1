@@ -2,8 +2,10 @@ import { api } from "@/convex/_generated/api";
 import { useReminders, type Reminder } from "@/hooks/use-reminders";
 import { useSettings } from "@/hooks/use-settings";
 import { useSpeechSynthesis } from "@/hooks/use-speech";
+import { useStudioVoice } from "@/hooks/use-studio-voice";
 import { useVoice } from "@/hooks/use-voice";
 import { sendNotification } from "@/lib/assistant-actions";
+import { pushNote } from "@/lib/companion/notes";
 import { useAction } from "convex/react";
 import { useCallback, useRef } from "react";
 
@@ -25,9 +27,14 @@ export function useAssistantNudge() {
   // The Control Room switch for unprompted lines. Off means it only answers.
   const speakUp = values.assistant_speak_up ?? true;
 
+  // The same studio voice the assistant answers in, so a timer going off and a
+  // question answered are the same woman speaking.
+  const studio = useStudioVoice();
+
   const { speak } = useSpeechSynthesis({
     enabled: !(values.silence ?? false),
     resolved,
+    studio,
   });
 
   // A line already in flight must not be asked for twice at once.
@@ -40,6 +47,12 @@ export function useAssistantNudge() {
         speak(`${title}. ${reminder.text}`);
         void sendNotification(title, reminder.text);
       };
+
+      // The little box in the corner is told as well, and told from what the hub
+      // already knows rather than from a model — so an alert reaches it even
+      // when no key is set and nothing behind the hub answers. The words it
+      // says out loud are the model's own, a moment later.
+      pushNote({ kind: "alert", text: `${title}: ${reminder.text}` });
 
       // The alarm always sounds; only the words change.
       if (quietHeld || !speakUp || running.current) {

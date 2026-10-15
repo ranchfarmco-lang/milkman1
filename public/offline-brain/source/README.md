@@ -6,7 +6,7 @@ you install: the archive is part of the download you already have.
 ## `freebuff-source.zip` — the Freebuff (Codebuff) monorepo
 
 Apache-2.0. TypeScript/Bun monorepo, the reference implementation of every layer
-in this package. 1,773 files, 18.9 MB:
+in this package. 1,773 files, 18.9 MB as it ships — 58.3 MB once unpacked:
 
 ```
 sha256  a930e0a5abb5e75ba9bd21476faefb5ad5f5b9f6534165cd307fe6184fea9855
@@ -60,6 +60,43 @@ freebuff/SPEC.md            how Freebuff is built from Codebuff
 
 Anywhere else in the package that names `source/freebuff/...` is pointing at a
 path inside the extracted tree.
+
+## `this-app-source.zip` — the hub's own app
+
+The application this whole package belongs to, in the same download: every page
+and Convex function, the shell, the desktop browser, the native host, NOVA OS,
+the scripts and the docs. 437 files, 5.4 MB as it ships — 19.9 MB once
+unpacked. Unpacked, it lands at `source/app/`:
+
+```bash
+bash ../scripts/capture-this-app.sh     # unzip, or python3 -m zipfile
+```
+
+The archive is built by the app itself (`scripts/pack-this-app.mjs` *there*),
+from the same walk that packs the copy the app's AI Builder reads and that
+every backup in its Control Room is taken from — so "the whole app" means the
+same file set everywhere it is said.
+
+Two files in it are generated rather than copied: `src/convex/self_source.ts`
+and `public/self-source.json`, the snapshot the app keeps of itself. The
+snapshot leaves itself out by design (a file cannot hold its own final
+contents), so both are written from the same tree when the archive is built.
+That is what makes the unpacked copy a project that types, builds and serves as
+it stands, instead of one whose functions import a module nobody shipped.
+
+Run it:
+
+```bash
+cd app
+bun install
+bun run own          # its own backend + database on this machine; see
+                     # app/self-hosting/README.md
+```
+
+`app/README.md` and `app/DEPLOY.md` say what it is and how to put it somewhere.
+The app is not needed for the brain beside it to work — the brain is the system
+that reproduces an AI coding assistant, the app is the thing you are holding —
+but a copy of the whole system should contain the whole system, and this is it.
 
 Install its dependencies with `bun install` inside `source/freebuff/` — that is
 the one step that reaches the network, it is optional, and it is only for the

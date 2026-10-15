@@ -278,6 +278,74 @@ export const start = mutation({
 });
 
 /**
+ * Ring more people into a call that is already up.
+ *
+ * `start` opens a *new* call and hangs up whatever the caller was in, which is
+ * right from an idle hub and wrong in the middle of a conversation: wanting
+ * somebody else on the call must not drop the people already on it. This adds
+ * them to the call as it stands, so they are rung exactly like anybody is — the
+ * panel, the ringtone, the system notification — and answering is simply
+ * joining the call that is already going on.
+ *
+ * Ringing somebody who stepped out or turned it down is how they are asked
+ * back: their membership goes back to `ringing`. Somebody already on the call,
+ * or already being rung, is left exactly as they are, so a double tap cannot
+ * produce two rings.
+ */
+export const invite = mutation({
+  args: { callId: v.id("calls"), to: v.array(v.id("users")) },
+  handler: async (ctx, { callId, to }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("Sign in to ring someone");
+
+    const call = await ctx.db.get(callId);
+    if (!call || call.state === "ended" || Date.now() - call.createdAt > STALE_MS) {
+      throw new Error("That call is over");
+    }
+
+    const members = await membersOf(ctx, callId);
+    const mine = members.find((one) => one.userId === userId);
+    if (!mine || mine.state !== "joined") {
+      throw new Error("Only somebody on the call can ring the others into it");
+    }
+
+    const joined = members.filter((one) => one.state === "joined").length;
+    const ringing = members.filter((one) => one.state === "ringing").length;
+    let room = MAX_CALL_PARTICIPANTS - joined - ringing;
+    let invited = 0;
+
+    for (const other of new Set(to)) {
+      if (other === userId || room <= 0) continue;
+
+      const user = await ctx.db.get(other);
+      if (!user || user.familyId !== call.familyId) continue;
+
+      const existing = members.find((one) => one.userId === other);
+      if (existing) {
+        // Already on the call, or already being rung: leave them alone. Anyone
+        // else — somebody who left, or turned it down — is rung again.
+        if (existing.state === "ringing" || existing.state === "joined") {
+          continue;
+        }
+        await ctx.db.patch(existing._id, { state: "ringing", at: Date.now() });
+      } else {
+        await ctx.db.insert("callMembers", {
+          callId,
+          userId: other,
+          state: "ringing",
+          at: Date.now(),
+        });
+      }
+
+      invited += 1;
+      room -= 1;
+    }
+
+    return invited;
+  },
+});
+
+/**
  * Get on the family's video room and wait.
  *
  * There is no ringing and nobody to invite — the room is the same one for
@@ -421,7 +489,17 @@ export const end = mutation({
   },
 });
 
-/** Hand a piece of the handshake to one other person. */
+/**
+ * Hand a piece of the handshake to one other person.
+ *
+ * `screen` and `screen-off` are not handshake steps: they carry the fact that
+ * somebody's shared screen has started or stopped, and the stream id it travels
+ * on. The picture itself never passes through here — it goes through the relay
+ * when one is set up, and straight between the two devices when there is not.
+ * This is only the line that tells everyone which stream to look at, so a
+ * shared screen is routed into its own portal instead of being mistaken for a
+ * camera.
+ */
 export const signal = mutation({
   args: {
     callId: v.id("calls"),
@@ -430,6 +508,8 @@ export const signal = mutation({
       v.literal("offer"),
       v.literal("answer"),
       v.literal("ice"),
+      v.literal("screen"),
+      v.literal("screen-off"),
     ),
     payload: v.string(),
   },

@@ -1,4 +1,4 @@
-import { resolveBackendUrl } from "@/lib/backend";
+import { backendUrlInUse } from "@/lib/backend";
 import { RefreshCw } from "lucide-react";
 
 /**
@@ -17,13 +17,14 @@ import { RefreshCw } from "lucide-react";
  * them can hand you the whole system to run on your own machine.
  */
 export function HubUnreachable({ retries = 0 }: { retries?: number }) {
-  // The address the client was actually given, worked out the same way the
-  // client works it out (see `src/lib/backend.ts`). That is the whole point: on
-  // a preview it is this page's own origin rather than a loopback address that
-  // could never have worked from here, and it is the one fact that turns "it is
-  // broken" into something a person can check. Nothing secret — the page's own
-  // origin, or the public deployment URL the build was configured with.
-  const address = resolveBackendUrl(
+  // The address the client was actually given — not worked out again here but
+  // read back from the one place that decided it (see `src/lib/backend.ts`).
+  // That is the whole point: on a preview it is this page's own origin rather
+  // than a loopback address that could never have worked from here, and it is
+  // the one fact that turns "it is broken" into something a person can check.
+  // Nothing secret — the page's own origin, or the public deployment URL the
+  // build was configured with.
+  const address = backendUrlInUse(
     import.meta.env.VITE_CONVEX_URL as string | undefined,
     window.location,
     import.meta.env.DEV,

@@ -131,17 +131,30 @@ function Command({ children, label }: { children: string; label?: string }) {
               window.setTimeout(() => setCopied(false), 1600);
               toast.success("Copied.");
             })
-            .catch(() => toast.error("This browser would not let me copy it — select it instead."));
+            .catch(() =>
+              toast.error(
+                "This browser would not let me copy it — select it instead.",
+              ),
+            );
         }}
       >
-        {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+        {copied ? (
+          <Check className="size-3.5" />
+        ) : (
+          <Copy className="size-3.5" />
+        )}
       </Button>
     </div>
   );
 }
 
 function TierBadge({ tier }: { tier: Connector["tier"] }) {
-  const label = { local: "on this machine", free: "no account", key: "needs a key", hosted: "hosted" }[tier];
+  const label = {
+    local: "on this machine",
+    free: "no account",
+    key: "needs a key",
+    hosted: "hosted",
+  }[tier];
   return (
     <span
       className={cn(
@@ -202,7 +215,9 @@ function Json({ value, label = "Result" }: { value: unknown; label?: string }) {
 export default function LocalBrain() {
   const [url, setUrl] = useState(DEFAULT_BRAIN_URL);
   const [token, setToken] = useState("");
-  const [status, setStatus] = useState<"searching" | "idle" | "connecting" | "connected">("searching");
+  const [status, setStatus] = useState<
+    "searching" | "idle" | "connecting" | "connected"
+  >("searching");
   const [failure, setFailure] = useState<{
     message: string;
     hint: string;
@@ -213,7 +228,10 @@ export default function LocalBrain() {
   const [tab, setTab] = useState<Tab>("overview");
   const [refreshing, setRefreshing] = useState(false);
 
-  const client = useMemo(() => (token || url ? new BrainClient({ url, token }) : null), [url, token]);
+  const client = useMemo(
+    () => (token || url ? new BrainClient({ url, token }) : null),
+    [url, token],
+  );
 
   /** Everything the page draws, fetched together so the panels agree. */
   const loadEverything = useCallback(async (active: BrainClient) => {
@@ -287,7 +305,11 @@ export default function LocalBrain() {
         toast.success("Paired with the brain on this machine.");
       } catch (error) {
         setStatus("connected");
-        toast.error(error instanceof Error ? error.message : "Paired, but the panels could not load.");
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Paired, but the panels could not load.",
+        );
       }
     },
     [loadEverything],
@@ -327,7 +349,9 @@ export default function LocalBrain() {
       await loadEverything(client);
       toast.success("Read again from the brain.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not read the brain.");
+      toast.error(
+        error instanceof Error ? error.message : "Could not read the brain.",
+      );
     } finally {
       setRefreshing(false);
     }
@@ -355,13 +379,16 @@ export default function LocalBrain() {
             <CircuitBoard className="size-5" />
           </span>
           <div className="min-w-0 flex-1">
-            <h1 className="text-[13px] font-bold tracking-tight">Local Brain</h1>
+            <h1 className="text-[13px] font-bold tracking-tight">
+              Local Brain
+            </h1>
             <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
-              The half of this system that runs on your own machine: its own memory, its own
-              tools, its own workspace, its own diagnostics — in Python 3 and nothing else. This
-              page does not <em>contain</em> a brain; it pairs with the one running on your
-              computer and shows you everything in it. Stop the brain and this page says so;
-              start it again and your memory is exactly where you left it.
+              The half of this system that runs on your own machine: its own
+              memory, its own tools, its own workspace, its own diagnostics — in
+              Python 3 and nothing else. This page does not <em>contain</em> a
+              brain; it pairs with the one running on your computer and shows
+              you everything in it. Stop the brain and this page says so; start
+              it again and your memory is exactly where you left it.
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -418,9 +445,9 @@ export default function LocalBrain() {
 
         {found && status !== "connected" ? (
           <p className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-            <Check className="size-3" />
-            A brain is running at <span className="text-foreground">{found}</span>. Paste its
-            pairing token and press Pair.
+            <Check className="size-3" />A brain is running at{" "}
+            <span className="text-foreground">{found}</span>. Paste its pairing
+            token and press Pair.
           </p>
         ) : null}
 
@@ -428,7 +455,9 @@ export default function LocalBrain() {
           <div className="mt-2 rounded-xl border border-border/70 bg-background/40 px-3 py-2">
             <p className="text-[11px] font-medium">{failure.message}</p>
             {failure.hint ? (
-              <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">{failure.hint}</p>
+              <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
+                {failure.hint}
+              </p>
             ) : null}
           </div>
         ) : null}
@@ -460,7 +489,8 @@ export default function LocalBrain() {
             </Button>
             <span className="ml-auto text-[10px] text-muted-foreground">
               {bundle.health.product} {bundle.health.version} · protocol{" "}
-              {bundle.health.protocol} · up {Math.max(1, Math.round(bundle.health.uptimeSeconds / 60))} min
+              {bundle.health.protocol} · up{" "}
+              {Math.max(1, Math.round(bundle.health.uptimeSeconds / 60))} min
             </span>
           </div>
         ) : null}
@@ -472,24 +502,31 @@ export default function LocalBrain() {
           <BrowserBrainCard />
 
           <Panel delay={0.03}>
-            <h2 className="text-[12px] font-semibold tracking-tight">Run the brain on your machine</h2>
+            <h2 className="text-[12px] font-semibold tracking-tight">
+              Run the brain on your machine
+            </h2>
             <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
-              It needs Python 3 and nothing else — no packages, no virtual environment, no
-              account, no key. Get the package from the{" "}
-              <a href="/offline-brain" className="text-foreground underline underline-offset-2">
+              It needs Python 3 and nothing else — no packages, no virtual
+              environment, no account, no key. Get the package from the{" "}
+              <a
+                href="/offline-brain"
+                className="text-foreground underline underline-offset-2"
+              >
                 Offline Brain
               </a>{" "}
-              page (everything is in there, the brain included), then in that folder:
+              page (everything is in there, the brain included), then in that
+              folder:
             </p>
             <div className="mt-2 flex flex-col gap-2">
               <Command>python3 brain/brain.py serve</Command>
               <Command>python3 brain/brain.py pair</Command>
             </div>
             <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
-              <span className="text-foreground">serve</span> starts the API and prints the pairing
-              token; <span className="text-foreground">pair</span> prints the address and the token
-              again if you need them later. Paste both above, once — the pairing is remembered on
-              this device.
+              <span className="text-foreground">serve</span> starts the API and
+              prints the pairing token;{" "}
+              <span className="text-foreground">pair</span> prints the address
+              and the token again if you need them later. Paste both above, once
+              — the pairing is remembered on this device.
             </p>
           </Panel>
 
@@ -499,18 +536,23 @@ export default function LocalBrain() {
               If the browser will not let this page reach it
             </h2>
             <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
-              A page served over <span className="text-foreground">https</span> is not normally
-              allowed to call <span className="text-foreground">http://127.0.0.1</span>. The brain
-              answers the browser's private-network preflight to allow it, and if your browser
-              still refuses, there are three ways round it, all of them local:
+              A page served over <span className="text-foreground">https</span>{" "}
+              is not normally allowed to call{" "}
+              <span className="text-foreground">http://127.0.0.1</span>. The
+              brain answers the browser's private-network preflight to allow it,
+              and if your browser still refuses, there are three ways round it,
+              all of them local:
             </p>
             <ul className="mt-2 flex flex-col gap-1.5">
               {[
                 "Open the hub at its own address over http:// rather than https, then press Pair again.",
-                "Use the brain from a terminal instead — `python3 brain/brain.py ask \"...\"` needs no browser at all.",
+                'Use the brain from a terminal instead — `python3 brain/brain.py ask "..."` needs no browser at all.',
                 "Run the brain with --host 0.0.0.0 on a machine you control and pair with its LAN address over http://.",
               ].map((line, index) => (
-                <li key={line} className="flex items-start gap-2 text-[10px] leading-4 text-muted-foreground">
+                <li
+                  key={line}
+                  className="flex items-start gap-2 text-[10px] leading-4 text-muted-foreground"
+                >
                   <span className="mt-px grid size-4 shrink-0 place-items-center rounded-full border border-border/60 text-[8px] text-foreground">
                     {index + 1}
                   </span>
@@ -551,15 +593,33 @@ export default function LocalBrain() {
 
           {tab === "overview" ? <Overview bundle={bundle} /> : null}
           {tab === "ask" ? <Asker client={client!} /> : null}
-          {tab === "tools" ? <ToolsPanel client={client!} bundle={bundle} onDone={refresh} /> : null}
-          {tab === "tasks" ? <TasksPanel client={client!} bundle={bundle} onDone={refresh} /> : null}
-          {tab === "memory" ? <MemoryPanel client={client!} onCount={refresh} /> : null}
+          {tab === "tools" ? (
+            <ToolsPanel client={client!} bundle={bundle} onDone={refresh} />
+          ) : null}
+          {tab === "tasks" ? (
+            <TasksPanel client={client!} bundle={bundle} onDone={refresh} />
+          ) : null}
+          {tab === "memory" ? (
+            <MemoryPanel client={client!} onCount={refresh} />
+          ) : null}
           {tab === "connectors" ? (
-            <ConnectorsPanel client={client!} bundle={bundle} onDone={refresh} />
+            <ConnectorsPanel
+              client={client!}
+              bundle={bundle}
+              onDone={refresh}
+            />
           ) : null}
           {tab === "models" ? <ModelsPanel bundle={bundle} /> : null}
-          {tab === "packages" ? <PackagesPanel client={client!} bundle={bundle} onDone={refresh} /> : null}
-          {tab === "diagnostics" ? <DiagnosticsPanel client={client!} bundle={bundle} onDone={refresh} /> : null}
+          {tab === "packages" ? (
+            <PackagesPanel client={client!} bundle={bundle} onDone={refresh} />
+          ) : null}
+          {tab === "diagnostics" ? (
+            <DiagnosticsPanel
+              client={client!}
+              bundle={bundle}
+              onDone={refresh}
+            />
+          ) : null}
         </>
       ) : null}
     </div>
@@ -571,19 +631,35 @@ export default function LocalBrain() {
 function Overview({ bundle }: { bundle: Bundle }) {
   const caps = bundle.capabilities;
   const stats = bundle.stats;
-  const gpu = caps.gpus.map((entry) => `${entry.name}${entry.vramMb ? ` (${entry.vramMb} MB)` : ""}`).join(", ");
+  const gpu = caps.gpus
+    .map(
+      (entry) => `${entry.name}${entry.vramMb ? ` (${entry.vramMb} MB)` : ""}`,
+    )
+    .join(", ");
 
   return (
     <div className="flex flex-col gap-3">
       <Panel delay={0.02}>
-        <h2 className="text-[12px] font-semibold tracking-tight">This machine</h2>
+        <h2 className="text-[12px] font-semibold tracking-tight">
+          This machine
+        </h2>
         <p className="mt-0.5 text-[10px] text-muted-foreground">
-          Probed by the brain itself, {since(caps.at)}. Nothing here was sent anywhere to be
-          found out.
+          Probed by the brain itself, {since(caps.at)}. Nothing here was sent
+          anywhere to be found out.
         </p>
         <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-          <Stat label="System" value={caps.host.distro || caps.host.os} note={`kernel ${caps.host.kernel}`} icon={HardDriveDownload} />
-          <Stat label="CPU" value={`${caps.cpu.cores} cores`} note={caps.cpu.model} icon={Cpu} />
+          <Stat
+            label="System"
+            value={caps.host.distro || caps.host.os}
+            note={`kernel ${caps.host.kernel}`}
+            icon={HardDriveDownload}
+          />
+          <Stat
+            label="CPU"
+            value={`${caps.cpu.cores} cores`}
+            note={caps.cpu.model}
+            icon={Cpu}
+          />
           <Stat
             label="Memory"
             value={`${caps.memory.totalGb} GB`}
@@ -605,16 +681,29 @@ function Overview({ bundle }: { bundle: Bundle }) {
           <Stat
             label="Network"
             value={caps.network.online ? "up" : "offline"}
-            note={caps.network.online ? "public sources reachable" : "local only — as designed"}
+            note={
+              caps.network.online
+                ? "public sources reachable"
+                : "local only — as designed"
+            }
             icon={Globe}
           />
           <Stat
             label="Tools"
             value={`${bundle.tools.length}`}
-            note={bundle.loaded.loaded.length ? `${bundle.loaded.loaded.length} written by the brain` : "all built in"}
+            note={
+              bundle.loaded.loaded.length
+                ? `${bundle.loaded.loaded.length} written by the brain`
+                : "all built in"
+            }
             icon={Terminal}
           />
-          <Stat label="Python" value={caps.host.python} note="the only thing it needs" icon={CircuitBoard} />
+          <Stat
+            label="Python"
+            value={caps.host.python}
+            note="the only thing it needs"
+            icon={CircuitBoard}
+          />
         </div>
       </Panel>
 
@@ -625,17 +714,28 @@ function Overview({ bundle }: { bundle: Bundle }) {
             Memory and workspace
           </h2>
           <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
-            One SQLite file, owned by this machine. Conversations, facts, events, tool runs,
-            snapshots and keys all live in it, and it reads without this software at all.
+            One SQLite file, owned by this machine. Conversations, facts,
+            events, tool runs, snapshots and keys all live in it, and it reads
+            without this software at all.
           </p>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <Stat label="Remembered" value={`${stats.memory}`} note="things kept" />
-            <Stat label="Tool runs" value={`${stats.toolRuns}`} note="recorded with their outcome" />
+            <Stat
+              label="Remembered"
+              value={`${stats.memory}`}
+              note="things kept"
+            />
+            <Stat
+              label="Tool runs"
+              value={`${stats.toolRuns}`}
+              note="recorded with their outcome"
+            />
             <Stat label="Events" value={`${stats.events}`} note="the log" />
             <Stat
               label="Full-text search"
               value={stats.fts ? "on" : "plain"}
-              note={stats.fts ? "ranked with bm25" : "matching only — still works"}
+              note={
+                stats.fts ? "ranked with bm25" : "matching only — still works"
+              }
             />
           </div>
           <div className="mt-2 flex flex-col gap-2">
@@ -650,8 +750,8 @@ function Overview({ bundle }: { bundle: Bundle }) {
             Where it looks for information
           </h2>
           <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
-            Asked in this order, stopping at the first tier that has something. The key is what is
-            missing before the paid tier, not after it.
+            Asked in this order, stopping at the first tier that has something.
+            The key is what is missing before the paid tier, not after it.
           </p>
           <ul className="mt-3 flex flex-col gap-1.5">
             {bundle.tiers.map((tier) => (
@@ -659,17 +759,23 @@ function Overview({ bundle }: { bundle: Bundle }) {
                 <span
                   className={cn(
                     "mt-1 size-1.5 shrink-0 rounded-full",
-                    tier.ready ? "bg-white" : "border border-border bg-transparent",
+                    tier.ready
+                      ? "bg-white"
+                      : "border border-border bg-transparent",
                   )}
                 />
                 <div className="min-w-0 flex-1">
                   <p className="text-[11px] font-medium">
                     {tier.tier}
                     {tier.ready ? null : (
-                      <span className="ml-1.5 text-[9px] text-muted-foreground">not ready</span>
+                      <span className="ml-1.5 text-[9px] text-muted-foreground">
+                        not ready
+                      </span>
                     )}
                   </p>
-                  <p className="text-[10px] leading-4 text-muted-foreground">{tier.detail}</p>
+                  <p className="text-[10px] leading-4 text-muted-foreground">
+                    {tier.detail}
+                  </p>
                 </div>
               </li>
             ))}
@@ -678,7 +784,9 @@ function Overview({ bundle }: { bundle: Bundle }) {
       </div>
 
       <Panel delay={0.08}>
-        <h2 className="text-[12px] font-semibold tracking-tight">What it has been doing</h2>
+        <h2 className="text-[12px] font-semibold tracking-tight">
+          What it has been doing
+        </h2>
         {bundle.events.length === 0 ? (
           <p className="mt-1 text-[10px] text-muted-foreground">
             Nothing logged yet. Ask it something and the steps land here.
@@ -686,12 +794,19 @@ function Overview({ bundle }: { bundle: Bundle }) {
         ) : (
           <ul className="mt-2 flex flex-col gap-1">
             {bundle.events.slice(0, 12).map((event) => (
-              <li key={event.id} className="flex items-start gap-2 text-[10px] leading-4">
-                <span className="mt-px w-14 shrink-0 text-muted-foreground">{since(event.at)}</span>
+              <li
+                key={event.id}
+                className="flex items-start gap-2 text-[10px] leading-4"
+              >
+                <span className="mt-px w-14 shrink-0 text-muted-foreground">
+                  {since(event.at)}
+                </span>
                 <span
                   className={cn(
                     "w-12 shrink-0 uppercase tracking-wide",
-                    event.level === "error" ? "text-foreground" : "text-muted-foreground",
+                    event.level === "error"
+                      ? "text-foreground"
+                      : "text-muted-foreground",
                   )}
                 >
                   {event.kind}
@@ -722,7 +837,9 @@ function Asker({ client }: { client: BrainClient }) {
     try {
       setResult(await client.ask(trimmed));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "It did not answer.");
+      toast.error(
+        error instanceof Error ? error.message : "It did not answer.",
+      );
     } finally {
       setAsking(false);
     }
@@ -731,11 +848,14 @@ function Asker({ client }: { client: BrainClient }) {
   return (
     <div className="flex flex-col gap-3">
       <Panel delay={0.02}>
-        <h2 className="text-[12px] font-semibold tracking-tight">Ask the brain on your machine</h2>
+        <h2 className="text-[12px] font-semibold tracking-tight">
+          Ask the brain on your machine
+        </h2>
         <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
-          It plans, calls its own tools, checks what came back, and shows the steps. With a local
-          model running it reasons through the model; without one it chooses the tools itself and
-          says plainly what it could not do.
+          It plans, calls its own tools, checks what came back, and shows the
+          steps. With a local model running it reasons through the model;
+          without one it chooses the tools itself and says plainly what it could
+          not do.
         </p>
         <div className="mt-3 flex flex-col gap-2 sm:flex-row">
           <Textarea
@@ -757,7 +877,11 @@ function Asker({ client }: { client: BrainClient }) {
             disabled={asking}
             onClick={() => void ask()}
           >
-            {asking ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+            {asking ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Send className="size-3.5" />
+            )}
             Ask
           </Button>
         </div>
@@ -767,7 +891,9 @@ function Asker({ client }: { client: BrainClient }) {
         <Panel delay={0.04}>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary" className="rounded-full text-[9px]">
-              {result.mode === "local-model" ? "reasoned with a local model" : "tools only — no model running"}
+              {result.mode === "local-model"
+                ? "reasoned with a local model"
+                : "tools only — no model running"}
             </Badge>
             {result.offline ? (
               <Badge variant="outline" className="rounded-full text-[9px]">
@@ -779,14 +905,19 @@ function Asker({ client }: { client: BrainClient }) {
                 {result.providerLabel} · {result.model}
               </span>
             ) : null}
-            <span className="ml-auto text-[10px] text-muted-foreground">{result.ms} ms</span>
+            <span className="ml-auto text-[10px] text-muted-foreground">
+              {result.ms} ms
+            </span>
           </div>
 
-          <p className="mt-3 whitespace-pre-wrap text-[12px] leading-5">{result.answer}</p>
+          <p className="mt-3 whitespace-pre-wrap text-[12px] leading-5">
+            {result.answer}
+          </p>
 
           {result.modelHint && !result.model ? (
             <p className="mt-2 rounded-xl border border-dashed border-border/70 px-3 py-2 text-[10px] leading-4 text-muted-foreground">
-              <span className="text-foreground">Worth doing:</span> {result.modelHint}
+              <span className="text-foreground">Worth doing:</span>{" "}
+              {result.modelHint}
             </p>
           ) : null}
 
@@ -797,17 +928,28 @@ function Asker({ client }: { client: BrainClient }) {
               </h3>
               <ul className="mt-2 flex flex-col gap-2">
                 {result.steps.map((step, index) => (
-                  <li key={`${step.tool}-${index}`} className="rounded-xl border border-border/70 bg-background/30 p-2.5">
+                  <li
+                    key={`${step.tool}-${index}`}
+                    className="rounded-xl border border-border/70 bg-background/30 p-2.5"
+                  >
                     <div className="flex flex-wrap items-center gap-2">
                       <span
                         className={cn(
                           "grid size-4 shrink-0 place-items-center rounded-full border text-[8px]",
-                          step.ok ? "border-white/60" : "border-dashed border-border/70",
+                          step.ok
+                            ? "border-white/60"
+                            : "border-dashed border-border/70",
                         )}
                       >
-                        {step.ok ? <Check className="size-2.5" /> : <X className="size-2.5" />}
+                        {step.ok ? (
+                          <Check className="size-2.5" />
+                        ) : (
+                          <X className="size-2.5" />
+                        )}
                       </span>
-                      <code className="text-[11px] font-medium">{step.tool}</code>
+                      <code className="text-[11px] font-medium">
+                        {step.tool}
+                      </code>
                       <span className="truncate text-[10px] text-muted-foreground">
                         {JSON.stringify(step.args)}
                       </span>
@@ -885,9 +1027,9 @@ function ToolsPanel({
               {bundle.tools.length} tools, all of them local
             </h2>
             <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
-              Files, shell, code and tests, memory, information lookup, capability discovery,
-              diagnostics. A tool that touches the network says so; everything else works with the
-              cable out.
+              Files, shell, code and tests, memory, information lookup,
+              capability discovery, diagnostics. A tool that touches the network
+              says so; everything else works with the cable out.
             </p>
           </div>
           <Button
@@ -903,9 +1045,12 @@ function ToolsPanel({
 
         {custom.length ? (
           <p className="mt-2 rounded-xl border border-dashed border-border/70 px-3 py-2 text-[10px] leading-4 text-muted-foreground">
-            <span className="text-foreground">It has written {custom.length} of its own:</span>{" "}
+            <span className="text-foreground">
+              It has written {custom.length} of its own:
+            </span>{" "}
             {custom.map((tool) => tool.name).join(", ")} — plain Python files in{" "}
-            {bundle.health.workspace}/tools, loaded on every start. Ask it to build one and it will.
+            {bundle.health.workspace}/tools, loaded on every start. Ask it to
+            build one and it will.
           </p>
         ) : null}
 
@@ -947,10 +1092,14 @@ function ToolsPanel({
                   <p className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium">
                     <code>{tool.name}</code>
                     {tool.broken ? (
-                      <span className="rounded-full border border-border/70 px-1.5 text-[8px] uppercase">broken</span>
+                      <span className="rounded-full border border-border/70 px-1.5 text-[8px] uppercase">
+                        broken
+                      </span>
                     ) : null}
                     {tool.source !== "builtin" ? (
-                      <span className="rounded-full border border-white/40 px-1.5 text-[8px] uppercase">its own</span>
+                      <span className="rounded-full border border-white/40 px-1.5 text-[8px] uppercase">
+                        its own
+                      </span>
                     ) : null}
                     {tool.stats?.calls ? (
                       <span className="ml-auto text-[9px] tabular-nums text-muted-foreground">
@@ -958,7 +1107,9 @@ function ToolsPanel({
                       </span>
                     ) : null}
                   </p>
-                  <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">{tool.summary}</p>
+                  <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
+                    {tool.summary}
+                  </p>
                   {stats.failures ? (
                     <p className="mt-0.5 text-[9px] text-muted-foreground">
                       {stats.failures} failed of {stats.calls}
@@ -980,17 +1131,21 @@ function ToolsPanel({
             <ul className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
               {Object.entries(selected.args).map(([name, description]) => (
                 <li key={name} className="text-[10px] text-muted-foreground">
-                  <code className="text-foreground">{name}</code> — {description}
+                  <code className="text-foreground">{name}</code> —{" "}
+                  {description}
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="mt-1 text-[10px] text-muted-foreground">It takes no arguments.</p>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              It takes no arguments.
+            </p>
           )}
           <Textarea
             value={args}
             onChange={(event) => setArgs(event.target.value)}
             rows={4}
+            data-spell="off"
             spellCheck={false}
             className="mt-2 font-mono text-[11px]"
           />
@@ -1002,11 +1157,17 @@ function ToolsPanel({
               disabled={running}
               onClick={() => void run()}
             >
-              {running ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+              {running ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Send className="size-3.5" />
+              )}
               Run it
             </Button>
             <span className="text-[10px] text-muted-foreground">
-              {selected.mutates ? "this one changes things on the machine" : "read-only"}
+              {selected.mutates
+                ? "this one changes things on the machine"
+                : "read-only"}
             </span>
           </div>
           {output ? <Json value={output} /> : null}
@@ -1018,7 +1179,13 @@ function ToolsPanel({
 
 /* --------------------------------------------------------------------- memory */
 
-function MemoryPanel({ client, onCount }: { client: BrainClient; onCount: () => Promise<void> }) {
+function MemoryPanel({
+  client,
+  onCount,
+}: {
+  client: BrainClient;
+  onCount: () => Promise<void>;
+}) {
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<MemoryRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -1032,7 +1199,9 @@ function MemoryPanel({ client, onCount }: { client: BrainClient; onCount: () => 
         setRows(answer.hits);
         setTotal(answer.total);
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Could not read the memory.");
+        toast.error(
+          error instanceof Error ? error.message : "Could not read the memory.",
+        );
       }
     },
     [client],
@@ -1050,9 +1219,13 @@ function MemoryPanel({ client, onCount }: { client: BrainClient; onCount: () => 
       setDraft("");
       await load(query);
       await onCount();
-      toast.success("Kept. It is in the database on your machine, not in this page.");
+      toast.success(
+        "Kept. It is in the database on your machine, not in this page.",
+      );
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not remember that.");
+      toast.error(
+        error instanceof Error ? error.message : "Could not remember that.",
+      );
     } finally {
       setBusy(false);
     }
@@ -1061,10 +1234,13 @@ function MemoryPanel({ client, onCount }: { client: BrainClient; onCount: () => 
   return (
     <div className="flex flex-col gap-3">
       <Panel delay={0.02}>
-        <h2 className="text-[12px] font-semibold tracking-tight">{total} things remembered</h2>
+        <h2 className="text-[12px] font-semibold tracking-tight">
+          {total} things remembered
+        </h2>
         <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
-          Held in the brain's own SQLite file. Nothing here is sent to this hub: reading and
-          writing memory goes straight to the machine in front of you.
+          Held in the brain's own SQLite file. Nothing here is sent to this hub:
+          reading and writing memory goes straight to the machine in front of
+          you.
         </p>
         <div className="mt-3 flex flex-col gap-2 sm:flex-row">
           <div className="relative flex-1">
@@ -1105,7 +1281,11 @@ function MemoryPanel({ client, onCount }: { client: BrainClient; onCount: () => 
             disabled={busy || !draft.trim()}
             onClick={() => void add()}
           >
-            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Database className="size-3.5" />}
+            {busy ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Database className="size-3.5" />
+            )}
             Remember
           </Button>
         </div>
@@ -1114,7 +1294,8 @@ function MemoryPanel({ client, onCount }: { client: BrainClient; onCount: () => 
       <Panel delay={0.04}>
         {rows.length === 0 ? (
           <p className="text-[10px] text-muted-foreground">
-            Nothing matches. Try another word, or tell it something above — it keeps it.
+            Nothing matches. Try another word, or tell it something above — it
+            keeps it.
           </p>
         ) : (
           <ul className="flex flex-col gap-1.5">
@@ -1123,7 +1304,9 @@ function MemoryPanel({ client, onCount }: { client: BrainClient; onCount: () => 
                 key={row.id}
                 className="flex items-start gap-2 rounded-xl border border-border/70 bg-background/30 px-3 py-2"
               >
-                <span className="mt-px shrink-0 text-[9px] tabular-nums text-muted-foreground">#{row.id}</span>
+                <span className="mt-px shrink-0 text-[9px] tabular-nums text-muted-foreground">
+                  #{row.id}
+                </span>
                 <div className="min-w-0 flex-1">
                   <p className="text-[11px] leading-4">{row.text}</p>
                   <p className="mt-0.5 text-[9px] text-muted-foreground">
@@ -1183,14 +1366,20 @@ function ConnectorsPanel({
     return [...byCapability.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [bundle.connectors]);
 
-  const act = async (key: string, work: () => Promise<unknown>, message: string) => {
+  const act = async (
+    key: string,
+    work: () => Promise<unknown>,
+    message: string,
+  ) => {
     setBusy(key);
     try {
       await work();
       await onDone();
       toast.success(message);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "That did not work.");
+      toast.error(
+        error instanceof Error ? error.message : "That did not work.",
+      );
     } finally {
       setBusy(null);
     }
@@ -1200,18 +1389,21 @@ function ConnectorsPanel({
     <div className="flex flex-col gap-3">
       <Panel delay={0.02}>
         <h2 className="text-[12px] font-semibold tracking-tight">
-          {bundle.connectorSummary.ready} of {bundle.connectorSummary.total} ready
+          {bundle.connectorSummary.ready} of {bundle.connectorSummary.total}{" "}
+          ready
         </h2>
         <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
           Every outside capability sits behind one replaceable slot, ranked{" "}
           <span className="text-foreground">on this machine</span> before{" "}
           <span className="text-foreground">no account</span> before{" "}
-          <span className="text-foreground">needs a key</span>. {bundle.connectorSummary.needingKeys} would
-          work with a key you have not added — and none of them are needed for the local five.
+          <span className="text-foreground">needs a key</span>.{" "}
+          {bundle.connectorSummary.needingKeys} would work with a key you have
+          not added — and none of them are needed for the local five.
         </p>
         <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
-          Keys are stored by the brain on your machine, or read from its environment — never here,
-          and never returned to this page. Set them from the machine instead and they never travel:{" "}
+          Keys are stored by the brain on your machine, or read from its
+          environment — never here, and never returned to this page. Set them
+          from the machine instead and they never travel:{" "}
           <code className="text-foreground">
             python3 brain/brain.py connectors set-key brave BRAVE_API_KEY=…
           </code>
@@ -1220,7 +1412,9 @@ function ConnectorsPanel({
 
       {groups.map(([capability, connectors], index) => (
         <Panel key={capability} delay={0.03 + index * 0.01}>
-          <h3 className="text-[11px] font-semibold tracking-tight">{capability}</h3>
+          <h3 className="text-[11px] font-semibold tracking-tight">
+            {capability}
+          </h3>
           <ul className="mt-2 flex flex-col gap-2">
             {connectors.map((connector) => {
               const key = `${connector.id}:${connector.envVars[0] ?? ""}`;
@@ -1230,7 +1424,9 @@ function ConnectorsPanel({
                   className="rounded-xl border border-border/70 bg-background/30 px-3 py-2.5"
                 >
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-[11px] font-medium">{connector.label}</span>
+                    <span className="text-[11px] font-medium">
+                      {connector.label}
+                    </span>
                     <TierBadge tier={connector.tier} />
                     {connector.ready ? (
                       <span className="flex items-center gap-1 text-[9px] text-muted-foreground">
@@ -1242,7 +1438,9 @@ function ConnectorsPanel({
                       </span>
                     )}
                     {connector.lastError ? (
-                      <span className="text-[9px] text-muted-foreground">last error: {connector.lastError}</span>
+                      <span className="text-[9px] text-muted-foreground">
+                        last error: {connector.lastError}
+                      </span>
                     ) : null}
                     <Button
                       type="button"
@@ -1253,7 +1451,11 @@ function ConnectorsPanel({
                       onClick={() =>
                         void act(
                           connector.id,
-                          () => client.setConnector(connector.id, !connector.enabled),
+                          () =>
+                            client.setConnector(
+                              connector.id,
+                              !connector.enabled,
+                            ),
                           `${connector.label} ${connector.enabled ? "switched off" : "switched on"}.`,
                         )
                       }
@@ -1266,7 +1468,9 @@ function ConnectorsPanel({
                       {connector.enabled ? "Switch off" : "Switch on"}
                     </Button>
                   </div>
-                  <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{connector.note}</p>
+                  <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
+                    {connector.note}
+                  </p>
 
                   {connector.envVars.length ? (
                     <div className="mt-2 flex flex-col gap-1.5 sm:flex-row">
@@ -1277,7 +1481,8 @@ function ConnectorsPanel({
                             ? `${connector.envVars[0]} — set (${connector.credential.from})`
                             : `${connector.envVars[0]} — not set`}
                         </span>
-                        {connector.credential.present && connector.credential.from === "store" ? (
+                        {connector.credential.present &&
+                        connector.credential.from === "store" ? (
                           <Button
                             type="button"
                             variant="ghost"
@@ -1287,7 +1492,11 @@ function ConnectorsPanel({
                             onClick={() =>
                               void act(
                                 key,
-                                () => client.dropCredential(connector.id, connector.envVars[0]),
+                                () =>
+                                  client.dropCredential(
+                                    connector.id,
+                                    connector.envVars[0],
+                                  ),
                                 "Key removed from the brain.",
                               )
                             }
@@ -1299,7 +1508,10 @@ function ConnectorsPanel({
                       <Input
                         value={drafts[key] ?? ""}
                         onChange={(event) =>
-                          setDrafts((current) => ({ ...current, [key]: event.target.value }))
+                          setDrafts((current) => ({
+                            ...current,
+                            [key]: event.target.value,
+                          }))
                         }
                         type="password"
                         placeholder="paste a key"
@@ -1314,14 +1526,25 @@ function ConnectorsPanel({
                           void act(
                             key,
                             async () => {
-                              await client.putCredential(connector.id, connector.envVars[0], drafts[key]);
-                              setDrafts((current) => ({ ...current, [key]: "" }));
+                              await client.putCredential(
+                                connector.id,
+                                connector.envVars[0],
+                                drafts[key],
+                              );
+                              setDrafts((current) => ({
+                                ...current,
+                                [key]: "",
+                              }));
                             },
                             "Key stored on your machine.",
                           )
                         }
                       >
-                        {busy === key ? <Loader2 className="size-3 animate-spin" /> : <KeyRound className="size-3" />}
+                        {busy === key ? (
+                          <Loader2 className="size-3 animate-spin" />
+                        ) : (
+                          <KeyRound className="size-3" />
+                        )}
                         Store
                       </Button>
                     </div>
@@ -1360,7 +1583,9 @@ function ModelsPanel({ bundle }: { bundle: Bundle }) {
     <div className="flex flex-col gap-3">
       <Panel delay={0.02}>
         <h2 className="text-[12px] font-semibold tracking-tight">
-          {up.length ? `${up.length} model server(s) answering` : "No local model server is running"}
+          {up.length
+            ? `${up.length} model server(s) answering`
+            : "No local model server is running"}
         </h2>
         <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
           {up.length
@@ -1369,10 +1594,16 @@ function ModelsPanel({ bundle }: { bundle: Bundle }) {
         </p>
         {!up.length ? (
           <div className="mt-3 flex flex-col gap-2">
-            <Command>ollama serve &amp;&amp; ollama pull qwen2.5-coder:7b</Command>
-            <Command>llama-server -m models/your-model.gguf --port 8080</Command>
+            <Command>
+              ollama serve &amp;&amp; ollama pull qwen2.5-coder:7b
+            </Command>
+            <Command>
+              llama-server -m models/your-model.gguf --port 8080
+            </Command>
             {bundle.modelHint ? (
-              <p className="text-[10px] leading-4 text-muted-foreground">{bundle.modelHint}</p>
+              <p className="text-[10px] leading-4 text-muted-foreground">
+                {bundle.modelHint}
+              </p>
             ) : null}
           </div>
         ) : null}
@@ -1386,18 +1617,24 @@ function ModelsPanel({ bundle }: { bundle: Bundle }) {
                 <span
                   className={cn(
                     "size-1.5 rounded-full",
-                    server.ok ? "bg-white" : "border border-border bg-transparent",
+                    server.ok
+                      ? "bg-white"
+                      : "border border-border bg-transparent",
                   )}
                 />
                 <span className="text-[11px] font-medium">{server.label}</span>
-                <span className="text-[10px] text-muted-foreground">{server.base}</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {server.base}
+                </span>
                 {server.local ? (
                   <span className="rounded-full border border-white/40 px-2 py-0.5 text-[9px]">
                     this machine
                   </span>
                 ) : null}
                 <span className="ml-auto text-[9px] text-muted-foreground">
-                  {server.ok ? `${server.models.length} model(s)` : server.error ?? "not answering"}
+                  {server.ok
+                    ? `${server.models.length} model(s)`
+                    : (server.error ?? "not answering")}
                 </span>
               </div>
               {server.ok && server.models.length ? (
@@ -1411,13 +1648,16 @@ function ModelsPanel({ bundle }: { bundle: Bundle }) {
                     </span>
                   ))}
                   {server.models.length > 8 ? (
-                    <span className="text-[9px] text-muted-foreground">+{server.models.length - 8} more</span>
+                    <span className="text-[9px] text-muted-foreground">
+                      +{server.models.length - 8} more
+                    </span>
                   ) : null}
                 </p>
               ) : null}
               {!server.ok && server.start ? (
                 <p className="mt-1 text-[9px] text-muted-foreground">
-                  start it with <code className="text-foreground">{server.start}</code>
+                  start it with{" "}
+                  <code className="text-foreground">{server.start}</code>
                 </p>
               ) : null}
             </li>
@@ -1445,12 +1685,19 @@ function DiagnosticsPanel({
   const runRepair = async (name: string) => {
     setBusy(name);
     try {
-      const result = (await client.repair(name)) as { ok?: boolean; detail?: string; error?: string };
-      if (result.ok === false) toast.error(result.error ?? "That repair failed.");
+      const result = (await client.repair(name)) as {
+        ok?: boolean;
+        detail?: string;
+        error?: string;
+      };
+      if (result.ok === false)
+        toast.error(result.error ?? "That repair failed.");
       else toast.success(result.detail ?? `${name} done.`);
       await onDone();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "That repair failed.");
+      toast.error(
+        error instanceof Error ? error.message : "That repair failed.",
+      );
     } finally {
       setBusy(null);
     }
@@ -1460,18 +1707,26 @@ function DiagnosticsPanel({
     <div className="flex flex-col gap-3">
       <Panel delay={0.02}>
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-[12px] font-semibold tracking-tight">Looking at itself</h2>
+          <h2 className="text-[12px] font-semibold tracking-tight">
+            Looking at itself
+          </h2>
           {(["blocking", "degraded", "note"] as const).map((level) => (
-            <Badge key={level} variant="outline" className="rounded-full text-[9px]">
+            <Badge
+              key={level}
+              variant="outline"
+              className="rounded-full text-[9px]"
+            >
               {report.counts[level]} {level}
             </Badge>
           ))}
-          <span className="ml-auto text-[10px] text-muted-foreground">{report.ms} ms</span>
+          <span className="ml-auto text-[10px] text-muted-foreground">
+            {report.ms} ms
+          </span>
         </div>
         <p className="mt-1 text-[10px] leading-4 text-muted-foreground">
-          Its own machine, its own tools, its own dependencies — checked, and every problem that
-          can be fixed mechanically comes with the name of the repair. Nothing here asked any
-          other computer anything.
+          Its own machine, its own tools, its own dependencies — checked, and
+          every problem that can be fixed mechanically comes with the name of
+          the repair. Nothing here asked any other computer anything.
         </p>
 
         <ul className="mt-3 flex flex-col gap-2">
@@ -1504,7 +1759,9 @@ function DiagnosticsPanel({
               </div>
               <p className="mt-1 text-[11px] leading-4">{finding.message}</p>
               {finding.detail ? (
-                <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">{finding.detail}</p>
+                <p className="mt-0.5 text-[10px] leading-4 text-muted-foreground">
+                  {finding.detail}
+                </p>
               ) : null}
             </li>
           ))}
@@ -1524,7 +1781,9 @@ function DiagnosticsPanel({
                   onClick={() => void runRepair(name)}
                   className="cursor-pointer rounded-full border border-border/70 px-2.5 py-1 text-[9px] text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
                 >
-                  {busy === name ? <Loader2 className="mr-1 inline size-2.5 animate-spin" /> : null}
+                  {busy === name ? (
+                    <Loader2 className="mr-1 inline size-2.5 animate-spin" />
+                  ) : null}
                   {name}
                 </button>
               ))}
@@ -1541,18 +1800,24 @@ function DiagnosticsPanel({
           </h2>
           <ul className="mt-2 flex flex-col gap-1">
             {report.tools.map((row) => (
-              <li key={row.tool} className="flex items-center gap-2 text-[10px]">
+              <li
+                key={row.tool}
+                className="flex items-center gap-2 text-[10px]"
+              >
                 <code className="text-[11px]">{row.tool}</code>
                 <span className="text-muted-foreground">
-                  {row.failures} of {row.calls} calls failed · {row.avgMs}ms average
+                  {row.failures} of {row.calls} calls failed · {row.avgMs}ms
+                  average
                 </span>
-                <span className="ml-auto text-muted-foreground">{since(row.lastAt)}</span>
+                <span className="ml-auto text-muted-foreground">
+                  {since(row.lastAt)}
+                </span>
               </li>
             ))}
           </ul>
           <p className="mt-2 text-[10px] leading-4 text-muted-foreground">
-            A tool the brain wrote for itself can be rewritten by asking it to — that is the
-            repair that matters most, and it is the last tab.
+            A tool the brain wrote for itself can be rewritten by asking it to —
+            that is the repair that matters most, and it is the last tab.
           </p>
         </Panel>
       ) : null}
@@ -1563,14 +1828,26 @@ function DiagnosticsPanel({
           Why this is independent
         </h2>
         <ul className="mt-2 flex flex-col gap-1.5 text-[10px] leading-4 text-muted-foreground">
-          <li>Memory is one SQLite file — backed up by copying it, read without this software.</li>
-          <li>Search is full-text, with a plain-matching fallback when SQLite has no FTS5.</li>
-          <li>HTTP is <code>urllib</code>; there is no vendor SDK anywhere in the stack.</li>
-          <li>Models are local servers on loopback, and optional.</li>
-          <li>Keys come from the environment first, so a key you exported is never written down.</li>
           <li>
-            The whole thing is {humanBytes(bundle.stats.bytes)} of database and text you can read,
-            move, or delete.
+            Memory is one SQLite file — backed up by copying it, read without
+            this software.
+          </li>
+          <li>
+            Search is full-text, with a plain-matching fallback when SQLite has
+            no FTS5.
+          </li>
+          <li>
+            HTTP is <code>urllib</code>; there is no vendor SDK anywhere in the
+            stack.
+          </li>
+          <li>Models are local servers on loopback, and optional.</li>
+          <li>
+            Keys come from the environment first, so a key you exported is never
+            written down.
+          </li>
+          <li>
+            The whole thing is {humanBytes(bundle.stats.bytes)} of database and
+            text you can read, move, or delete.
           </li>
         </ul>
       </Panel>

@@ -51,6 +51,10 @@ export type ActionContext = {
 
 const APP_PAGES = [
   "assistant",
+  // The builder carries both jobs — the app it made, and this app's own mirror
+  // in its sandbox, where the hub itself is changed. There used to be a second
+  // entry here for a This App page; the page is a box of that one now, so a
+  // separate name would be a second way to the same place.
   "builder",
   "family",
   "messenger",
@@ -133,7 +137,9 @@ function audienceOf(value: unknown): Audience {
   if (["private", "personal", "just_me", "me", "only_me"].includes(wanted)) {
     return "private";
   }
-  if (["group", "some", "few", "a_few", "select", "subgroup"].includes(wanted)) {
+  if (
+    ["group", "some", "few", "a_few", "select", "subgroup"].includes(wanted)
+  ) {
     return "group";
   }
   return "family";
@@ -225,13 +231,16 @@ export async function runActions(
             allDay: action.all_day === true || action.allDay === true,
             location: textOf(action.location) || undefined,
             notes: textOf(action.notes) || undefined,
-            recipeUrl: textOf(action.recipe_url ?? action.recipeUrl) || undefined,
+            recipeUrl:
+              textOf(action.recipe_url ?? action.recipeUrl) || undefined,
             ingredients: listOf(action.ingredients),
             place: textOf(action.place) || undefined,
             appointmentType:
               textOf(action.appointment_type ?? action.appointmentType) ||
               undefined,
-            audience: audienceOf(action.audience ?? action.for ?? action.who_sees),
+            audience: audienceOf(
+              action.audience ?? action.for ?? action.who_sees,
+            ),
             who: listOf(action.who ?? action.attendees ?? action.for_people),
           });
           break;
@@ -261,7 +270,10 @@ export async function runActions(
           await setFullscreen(action.on !== false);
           break;
         case "vibrate": {
-          const ms = Math.min(2000, Math.max(50, numberOf(action.milliseconds, 300)));
+          const ms = Math.min(
+            2000,
+            Math.max(50, numberOf(action.milliseconds, 300)),
+          );
           buzz(ms);
           break;
         }

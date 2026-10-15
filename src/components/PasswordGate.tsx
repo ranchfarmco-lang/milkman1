@@ -8,10 +8,11 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { api } from "@/convex/_generated/api";
+import { deviceId } from "@/lib/device-identity";
 import { cn } from "@/lib/utils";
 import { useMutation, useQuery } from "convex/react";
 import { ArrowRight, KeyRound, Loader2, Lock } from "lucide-react";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 /**
  * The two things that stand between the app and the account: the family
@@ -32,6 +33,8 @@ export function PasswordGate({ children }: { children: ReactNode }) {
   const user = useQuery(api.users.currentUser);
   const unlock = useMutation(api.access.unlock);
   const setDisplayName = useMutation(api.family.setDisplayName);
+  // Which installation is answering, so the sign-in list can say where.
+  const id = useMemo(() => deviceId(), []);
 
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -60,7 +63,7 @@ export function PasswordGate({ children }: { children: ReactNode }) {
     setError(null);
 
     try {
-      const result = await unlock({ password });
+      const result = await unlock({ password, deviceId: id });
       if (result.ok) {
         setPassword("");
         return;

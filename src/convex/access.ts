@@ -1,6 +1,13 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
-import { isUnlocked } from "./guard";
+import {
+  devicesFor,
+  hubPassword,
+  isDeviceAuthorized,
+  isUnlocked,
+} from "./guard";
+import { logSignIn } from "./people";
+import { logSecurityEvent } from "./security";
 import { internalQuery, mutation, query } from "./_generated/server";
 
 /**
@@ -17,6 +24,12 @@ import { internalQuery, mutation, query } from "./_generated/server";
  *
  * With `HUB_PASSWORD` unset the hub behaves exactly as it did before — open —
  * so this can be switched on simply by setting the variable.
+ *
+ * Sign-in is guests-only for now: `guard.GUESTS_ONLY` is on, so `hubPassword`
+ * answers null and none of the below is in force. Nothing here is deleted —
+ * the password screen, the answer it records and the device rule that follows
+ * it all come back the moment that switch is flipped, because every one of them
+ * asks `hubPassword` rather than reading the environment for itself.
  */
 
 /** Wrong guesses allowed before a short wait. */
@@ -24,13 +37,6 @@ const MAX_ATTEMPTS = 5;
 
 /** How long the wait is, in milliseconds. */
 const COOLDOWN_MS = 30_000;
-
-/** The shared password, or null when none is configured. */
-function sharedPassword(): string | null {
-  const raw = process.env.HUB_PASSWORD;
-  const clean = typeof raw === "string" ? raw.trim() : "";
-  return clean.length > 0 ? clean : null;
-}
 
 /**
  * Same password or not, without returning early on the first wrong character.
@@ -56,13 +62,17 @@ function matches(given: string, expected: string) {
 export const state = query({
   args: {},
   handler: async (ctx) => {
-    if (sharedPassword() === null) {
-      return { required: false, unlocked: true, waiting: 0 };
+    // Reported alongside the password answer so the Control Room's security
+    // panel can show the device half of access too, from real server state.
+    const deviceAuthorized = await isDeviceAuthorized(ctx);
+
+    if (hubPassword() === null) {
+      return { required: false, unlocked: true, waiting: 0, deviceAuthorized };
     }
 
     const userId = await getAuthUserId(ctx);
     if (userId === null) {
-      return { required: true, unlocked: false, waiting: 0 };
+      return { required: true, unlocked: false, waiting: 0, deviceAuthorized };
     }
 
     const row = await ctx.db
@@ -75,6 +85,7 @@ export const state = query({
       required: true,
       unlocked: row?.unlockedAt !== undefined,
       waiting,
+      deviceAuthorized,
     };
   },
 });
@@ -97,9 +108,12 @@ export const unlocked = internalQuery({
  * the thing that actually reads the family's data afterwards.
  */
 export const unlock = mutation({
-  args: { password: v.string() },
-  handler: async (ctx, { password }) => {
-    const expected = sharedPassword();
+  // The device id rides along so the sign-in list can say where the password
+  // was answered. It is not what grants access — `register` and the guard own
+  // that — so an absent or unknown id costs only the "where" on the one row.
+  args: { password: v.string(), deviceId: v.optional(v.string()) },
+  handler: async (ctx, { password, deviceId }) => {
+    const expected = hubPassword();
     // Nothing to answer: leave everything as it was.
     if (expected === null) return { ok: true, waiting: 0 };
 
@@ -128,8 +142,37 @@ export const unlock = mutation({
       } else {
         await ctx.db.insert("access", { userId, unlockedAt: now, attempts: 0 });
       }
+      await logSecurityEvent(ctx, {
+        event: "session.created",
+        detail: "The family password was answered on this account.",
+        actorId: userId,
+      });
+
+      // And into the sign-in history, which is the list the family clears:
+      // who came in, on what, and when.
+      const device = deviceId
+        ? (await devicesFor(ctx, userId)).find(
+            (row) => row.deviceId === deviceId,
+          )
+        : undefined;
+      const user = await ctx.db.get(userId);
+      await logSignIn(ctx, {
+        userId,
+        name: user?.name,
+        deviceId,
+        deviceName: device?.name,
+        platform: device?.platform,
+        what: "Family password accepted",
+      });
+
       return { ok: true, waiting: 0, needsSignIn: false };
     }
+
+    await logSecurityEvent(ctx, {
+      event: "session.failed",
+      detail: "A wrong family password was entered.",
+      actorId: userId,
+    });
 
     // A wrong answer. Count it, and after enough of them make the person wait,
     // so a short password is not something to sit and guess at.
@@ -180,6 +223,12 @@ export const lock = mutation({
     if (user?.familyId !== undefined) {
       await ctx.db.patch(userId, { familyId: undefined });
     }
+
+    await logSecurityEvent(ctx, {
+      event: "session.ended",
+      detail: "The device was locked and the password is required again.",
+      actorId: userId,
+    });
 
     return null;
   },
